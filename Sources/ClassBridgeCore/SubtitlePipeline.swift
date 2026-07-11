@@ -104,6 +104,70 @@ public actor SubtitlePipeline {
         publish()
     }
 
+    @discardableResult
+    public func replaceFinalTranscript(
+        with text: String,
+        duration: TimeInterval,
+        provider: String,
+        maximumWordsPerSegment: Int = 80
+    ) async -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty,
+              !finalSegments.contains(where: \.isUserCorrected) else {
+            return false
+        }
+
+        let chunks = Self.transcriptChunks(
+            text,
+            maximumWordsPerSegment: maximumWordsPerSegment
+        )
+        guard !chunks.isEmpty else { return false }
+
+        let wordCounts = chunks.map(Self.wordCount)
+        let totalWordCount = max(1, wordCounts.reduce(0, +))
+        var elapsedWordCount = 0
+
+        finalSegments = chunks.enumerated().map { index, chunk in
+            let startTime = duration * Double(elapsedWordCount) / Double(totalWordCount)
+            elapsedWordCount += wordCounts[index]
+            let endTime = index == chunks.indices.last
+                ? duration
+                : duration * Double(elapsedWordCount) / Double(totalWordCount)
+            return TranscriptSegment(
+                startTime: startTime,
+                endTime: max(startTime, endTime),
+                sourceText: chunk,
+                state: .final,
+                provider: provider
+            )
+        }
+        provisionalSegment = nil
+        publish()
+
+        for index in finalSegments.indices {
+            let segment = finalSegments[index]
+            let context = TranslationContext(
+                course: course,
+                recentSourceText: Array(
+                    finalSegments[..<index].suffix(recentContextLimit).map(\.sourceText)
+                ),
+                approvedTerms: approvedTerms
+            )
+
+            do {
+                let translation = try await translationEngine.translate(
+                    segment.sourceText,
+                    context: context
+                )
+                applyTranslation(translation, to: segment.id)
+                publish()
+            } catch {
+                // Keep the improved English segment. Translation can be retried later.
+            }
+        }
+        return true
+    }
+
     private func upsertFinalSegment(_ segment: TranscriptSegment) {
         if let index = finalSegments.firstIndex(where: { $0.id == segment.id }) {
             guard !finalSegments[index].isUserCorrected else { return }
@@ -143,5 +207,64 @@ public actor SubtitlePipeline {
 
     private func removeContinuation(_ id: UUID) {
         continuations[id] = nil
+    }
+
+    private static func transcriptChunks(
+        _ text: String,
+        maximumWordsPerSegment: Int
+    ) -> [String] {
+        let maximumWordsPerSegment = max(1, maximumWordsPerSegment)
+        var sentences: [String] = []
+        text.enumerateSubstrings(
+            in: text.startIndex..<text.endIndex,
+            options: .bySentences
+        ) { substring, _, _, _ in
+            guard let sentence = substring?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !sentence.isEmpty else { return }
+            sentences.append(sentence)
+        }
+        if sentences.isEmpty {
+            sentences = [text]
+        }
+
+        var chunks: [String] = []
+        var currentSentences: [String] = []
+        var currentWordCount = 0
+
+        func flushCurrentChunk() {
+            guard !currentSentences.isEmpty else { return }
+            chunks.append(currentSentences.joined(separator: " "))
+            currentSentences.removeAll(keepingCapacity: true)
+            currentWordCount = 0
+        }
+
+        for sentence in sentences {
+            let words = sentence.split(whereSeparator: \.isWhitespace)
+            if words.count > maximumWordsPerSegment {
+                flushCurrentChunk()
+                var start = words.startIndex
+                while start < words.endIndex {
+                    let end = words.index(
+                        start,
+                        offsetBy: maximumWordsPerSegment,
+                        limitedBy: words.endIndex
+                    ) ?? words.endIndex
+                    chunks.append(words[start..<end].joined(separator: " "))
+                    start = end
+                }
+            } else {
+                if currentWordCount + words.count > maximumWordsPerSegment {
+                    flushCurrentChunk()
+                }
+                currentSentences.append(sentence)
+                currentWordCount += words.count
+            }
+        }
+        flushCurrentChunk()
+        return chunks
+    }
+
+    private static func wordCount(_ text: String) -> Int {
+        text.split(whereSeparator: \.isWhitespace).count
     }
 }

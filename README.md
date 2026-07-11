@@ -13,18 +13,20 @@ This repository currently contains the first local microphone vertical slice:
 - Atomic JSON session persistence.
 - AVAudioEngine microphone permission, capture, and 16 kHz mono conversion.
 - FluidAudio Parakeet EOU 120M energy-saving recognition with adaptive gain and limiting.
-- FluidAudio Parakeet Unified 0.6B high-accuracy streaming recognition.
+- FluidAudio Parakeet Unified 0.6B high-accuracy streaming recognition at 1120 ms context.
+- An automatic full-context offline transcription pass before high-accuracy sessions are saved.
+- In-memory session audio buffering that is released after the offline pass and never persisted.
 - A native SwiftUI macOS workspace with live input level and real subtitle events.
-- Seventeen core unit tests.
+- Twenty unit tests across the shared core and audio buffer.
 
-Energy-saving mode downloads an approximately 120 MB model. High-accuracy mode downloads approximately 595 MB on first use and then starts from the local Core ML cache. Audio and recognition remain on the Mac. Chinese translation is still a placeholder and is the next production adapter.
+Energy-saving mode downloads an approximately 120 MB model. High-accuracy mode progressively caches approximately 1.2 GB for its real-time and after-class encoders, then starts from the local Core ML cache. A one-hour 16 kHz mono session uses about 230 MB of temporary memory for the after-class pass. Audio and recognition remain on the Mac. Chinese translation is still a placeholder and is the next production adapter.
 
 ## Build
 
 ```bash
-DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift build
-DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift test
-DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift run ClassBridgeMac
+DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift build --disable-sandbox
+DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift test --disable-sandbox
+DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift run --disable-sandbox ClassBridgeMac
 ```
 
 Build a foreground development app with microphone permission metadata and an ad-hoc signature:

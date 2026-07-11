@@ -53,7 +53,7 @@ let package = Package(
         ),
         .testTarget(
             name: "ClassBridgeCoreTests",
-            dependencies: ["ClassBridgeCore"]
+            dependencies: ["ClassBridgeCore", "ClassBridgeAudio"]
         ),
     ]
 )

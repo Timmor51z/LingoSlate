@@ -1,4 +1,5 @@
 import XCTest
+@testable import ClassBridgeAudio
 @testable import ClassBridgeCore
 
 final class ClassBridgeCoreTests: XCTestCase {
@@ -76,6 +77,20 @@ final class ClassBridgeCoreTests: XCTestCase {
         XCTAssertEqual(result.errorRate, 2.0 / 3.0, accuracy: 0.0001)
     }
 
+    func testTranscriptComparisonCalculatesMemoryEfficientWordDistance() {
+        XCTAssertEqual(
+            TranscriptComparison.wordEditDistance(
+                reference: "the cat sat",
+                hypothesis: "the dog sat there"
+            ),
+            2
+        )
+        XCTAssertEqual(
+            TranscriptComparison.wordEditDistance(reference: "", hypothesis: "hello world"),
+            2
+        )
+    }
+
     func testTranscriptComparisonCriticalTokenRecallUsesCounts() {
         let reference = ["2026", "steam", "steam"]
         let hypothesis = ["2026", "steam"]
@@ -109,6 +124,33 @@ final class ClassBridgeCoreTests: XCTestCase {
 
         XCTAssertEqual(silence.normalizedLevel, 0, accuracy: 0.001)
         XCTAssertEqual(loud.normalizedLevel, 1, accuracy: 0.001)
+    }
+
+    func testSessionAudioBufferTracksDurationAndReleasesFrames() async {
+        let buffer = SessionAudioBuffer()
+        await buffer.append(
+            AudioFrame(
+                samples: [Float](repeating: 0.1, count: 3_200),
+                sampleRate: 16_000,
+                capturedAt: 10
+            )
+        )
+        await buffer.append(
+            AudioFrame(
+                samples: [Float](repeating: 0.1, count: 3_200),
+                sampleRate: 16_000,
+                capturedAt: 10.2
+            )
+        )
+
+        let duration = await buffer.duration
+        let wasEmpty = await buffer.isEmpty
+        await buffer.reset()
+        let isEmpty = await buffer.isEmpty
+
+        XCTAssertEqual(duration, 0.4, accuracy: 0.001)
+        XCTAssertFalse(wasEmpty)
+        XCTAssertTrue(isEmpty)
     }
 
     func testIncrementalTranscriptCursorReturnsOnlyNewWords() {
@@ -244,6 +286,43 @@ final class ClassBridgeCoreTests: XCTestCase {
         XCTAssertEqual(snapshot.finalSegments.count, 1)
         XCTAssertEqual(snapshot.finalSegments[0].translatedText, "译文：The event loop schedules callbacks.")
         XCTAssertEqual(snapshot.finalSegments[0].state, .translated)
+    }
+
+    func testPipelineReplacesRealtimeTranscriptWithChunkedOfflineTranscript() async {
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Concurrency"),
+            translationEngine: TestTranslationEngine()
+        )
+        await pipeline.consume(
+            .final(
+                id: UUID(),
+                text: "Incomplete live transcript.",
+                startTime: 0,
+                endTime: 4,
+                speaker: nil,
+                provider: "live"
+            )
+        )
+
+        let replaced = await pipeline.replaceFinalTranscript(
+            with: "One two three four. Five six seven eight.",
+            duration: 12,
+            provider: "offline",
+            maximumWordsPerSegment: 4
+        )
+        let snapshot = await pipeline.currentSnapshot()
+
+        XCTAssertTrue(replaced)
+        XCTAssertEqual(snapshot.finalSegments.count, 2)
+        XCTAssertEqual(snapshot.finalSegments.map(\.provider), ["offline", "offline"])
+        XCTAssertEqual(snapshot.finalSegments[0].startTime, 0, accuracy: 0.001)
+        XCTAssertEqual(snapshot.finalSegments[0].endTime, 6, accuracy: 0.001)
+        XCTAssertEqual(snapshot.finalSegments[1].endTime, 12, accuracy: 0.001)
+        XCTAssertEqual(
+            snapshot.finalSegments.map(\.sourceText).joined(separator: " "),
+            "One two three four. Five six seven eight."
+        )
+        XCTAssertTrue(snapshot.finalSegments.allSatisfy { $0.state == .translated })
     }
 
     func testSessionStoreRoundTrip() async throws {

@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
 
     private let stateMachine = SessionStateMachine()
     private let sessionStore: SessionStore
+    private let postClassAudioBuffer = SessionAudioBuffer()
 
     private var pipeline: SubtitlePipeline?
     private var recognitionEngine: (any SpeechRecognitionEngine)?
@@ -79,6 +80,7 @@ final class AppModel: ObservableObject {
             : .energySaver
         let engine = LocalRecognitionEngineFactory.make(profile: recognitionProfile)
         let capture = MicrophoneAudioCapture()
+        let shouldRunPostClassOptimization = processingMode == .highAccuracy
 
         self.pipeline = pipeline
         recognitionEngine = engine
@@ -110,7 +112,14 @@ final class AppModel: ObservableObject {
                 case let .failed(message):
                     await self?.markFailed(message)
                 case .finished:
-                    await self?.completeSession()
+                    if shouldRunPostClassOptimization {
+                        await self?.runPostClassOptimization(
+                            pipeline: pipeline,
+                            configuration: RecognitionConfiguration(course: course)
+                        )
+                    } else {
+                        await self?.completeSession()
+                    }
                 default:
                     break
                 }
@@ -130,6 +139,9 @@ final class AppModel: ObservableObject {
                     self?.inputLevel = level
                 case let .frame(frame):
                     do {
+                        if shouldRunPostClassOptimization {
+                            await self?.postClassAudioBuffer.append(frame)
+                        }
                         try await engine.accept(frame)
                     } catch {
                         await self?.markFailed(error.localizedDescription)
@@ -147,6 +159,7 @@ final class AppModel: ObservableObject {
         startupTask = Task { [weak self] in
             guard let self else { return }
             do {
+                await self.postClassAudioBuffer.reset()
                 try await self.stateMachine.transition(to: .preparing)
                 self.lifecycleState = await self.stateMachine.currentState()
 
@@ -224,6 +237,7 @@ final class AppModel: ObservableObject {
         statusMessage = "就绪"
 
         Task {
+            await postClassAudioBuffer.reset()
             let current = await stateMachine.currentState()
             if current == .completed || isFailure(current) {
                 try? await stateMachine.transition(to: .idle)
@@ -248,6 +262,7 @@ final class AppModel: ObservableObject {
 
     private func markFailed(_ message: String) async {
         await audioCapture?.stop()
+        await postClassAudioBuffer.reset()
         let current = await stateMachine.currentState()
         if current != .idle {
             try? await stateMachine.transition(to: .failed(message: message))
@@ -270,6 +285,10 @@ final class AppModel: ObservableObject {
             }
             lifecycleState = await stateMachine.currentState()
 
+            if let pipeline {
+                snapshot = await pipeline.currentSnapshot()
+            }
+
             if var document = currentDocument {
                 document.endedAt = Date()
                 document.segments = snapshot.finalSegments
@@ -287,6 +306,7 @@ final class AppModel: ObservableObject {
 
     private func cancelPreparation() async {
         await audioCapture?.stop()
+        await postClassAudioBuffer.reset()
         let current = await stateMachine.currentState()
         if current == .preparing {
             try? await stateMachine.transition(to: .idle)
@@ -299,5 +319,66 @@ final class AppModel: ObservableObject {
     private func isFailure(_ state: SessionLifecycleState) -> Bool {
         if case .failed = state { return true }
         return false
+    }
+
+    private func runPostClassOptimization(
+        pipeline: SubtitlePipeline,
+        configuration: RecognitionConfiguration
+    ) async {
+        guard !(await postClassAudioBuffer.isEmpty) else {
+            await completeSession()
+            return
+        }
+
+        statusMessage = "正在生成课后高精度稿"
+        let offlineProfile = FluidAudioStreamingProfile.unifiedOffline15s
+        let engine = FluidAudioStreamingRecognitionEngine(profile: offlineProfile)
+        let collector = OfflineTranscriptCollector()
+        let offlineEventTask = Task {
+            for await event in engine.events {
+                guard !Task.isCancelled else { return }
+                await collector.consume(event)
+            }
+        }
+
+        do {
+            try await engine.start(configuration: configuration)
+            try await postClassAudioBuffer.replay(into: engine)
+            try await engine.finalize()
+            await offlineEventTask.value
+
+            if let transcript = await collector.transcript {
+                let duration = await postClassAudioBuffer.duration
+                _ = await pipeline.replaceFinalTranscript(
+                    with: transcript,
+                    duration: duration,
+                    provider: offlineProfile.providerIdentifier
+                )
+            }
+        } catch {
+            offlineEventTask.cancel()
+            try? await engine.finalize()
+            statusMessage = "课后高精度处理失败，正在保存实时稿"
+        }
+
+        await postClassAudioBuffer.reset()
+        await completeSession()
+    }
+}
+
+private actor OfflineTranscriptCollector {
+    private var finalParts: [String] = []
+
+    var transcript: String? {
+        let text = finalParts.joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    func consume(_ event: RecognitionEvent) {
+        guard case let .final(_, text, _, _, _, _) = event else { return }
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return }
+        finalParts.append(trimmedText)
     }
 }

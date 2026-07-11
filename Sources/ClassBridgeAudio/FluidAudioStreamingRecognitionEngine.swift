@@ -6,6 +6,7 @@ import Foundation
 public enum FluidAudioStreamingProfile: String, CaseIterable, Sendable {
     case unified640ms
     case unified1120ms
+    case unifiedOffline15s
     case nemotron1120ms
 
     public var displayName: String {
@@ -14,6 +15,8 @@ public enum FluidAudioStreamingProfile: String, CaseIterable, Sendable {
             return "Parakeet Unified 0.6B, 640 ms"
         case .unified1120ms:
             return "Parakeet Unified 0.6B, 1120 ms"
+        case .unifiedOffline15s:
+            return "Parakeet Unified 0.6B, offline 15 s"
         case .nemotron1120ms:
             return "Nemotron 0.6B, 1120 ms"
         }
@@ -25,13 +28,19 @@ public enum FluidAudioStreamingProfile: String, CaseIterable, Sendable {
             return .parakeetUnified640ms
         case .unified1120ms:
             return .parakeetUnified1120ms
+        case .unifiedOffline15s:
+            return .parakeetUnifiedOffline15s
         case .nemotron1120ms:
             return .nemotron1120ms
         }
     }
 
-    fileprivate var provider: String {
+    public var providerIdentifier: String {
         "fluidaudio-\(rawValue)"
+    }
+
+    fileprivate var emitsStreamingPartials: Bool {
+        self != .unifiedOffline15s
     }
 }
 
@@ -50,7 +59,7 @@ public enum LocalRecognitionEngineFactory {
         case .energySaver:
             base = FluidAudioRecognitionEngine()
         case .highAccuracy:
-            base = FluidAudioStreamingRecognitionEngine(profile: .unified640ms)
+            base = FluidAudioStreamingRecognitionEngine(profile: .unified1120ms)
         }
 
         let shouldEnhanceAudio = enhancesAudio ?? (profile == .energySaver)
@@ -132,6 +141,7 @@ public actor FluidAudioStreamingRecognitionEngine: SpeechRecognitionEngine {
 
         try await manager.appendAudio(buffer)
         try await manager.processBufferedAudio()
+        guard profile.emitsStreamingPartials else { return }
         let transcript = await manager.getPartialTranscript()
         emitAvailableTranscript(transcript)
     }
@@ -177,7 +187,7 @@ public actor FluidAudioStreamingRecognitionEngine: SpeechRecognitionEngine {
                 text: text,
                 startTime: segmentStartTime,
                 endTime: latestFrameTime,
-                provider: profile.provider
+                provider: profile.providerIdentifier
             )
         )
     }
@@ -194,7 +204,7 @@ public actor FluidAudioStreamingRecognitionEngine: SpeechRecognitionEngine {
                 startTime: segmentStartTime,
                 endTime: latestFrameTime,
                 speaker: nil,
-                provider: profile.provider
+                provider: profile.providerIdentifier
             )
         )
         transcriptCursor.commit(transcript)

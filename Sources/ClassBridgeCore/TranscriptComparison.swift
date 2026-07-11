@@ -115,6 +115,34 @@ public enum TranscriptComparison {
         )
     }
 
+    public static func wordEditDistance(
+        reference: String,
+        hypothesis: String
+    ) -> Int {
+        let referenceWords = normalizedWords(in: reference)
+        let hypothesisWords = normalizedWords(in: hypothesis)
+        var previous = Array(0...hypothesisWords.count)
+        var current = [Int](repeating: 0, count: hypothesisWords.count + 1)
+
+        for referenceIndex in referenceWords.indices {
+            current[0] = referenceIndex + 1
+            for hypothesisIndex in hypothesisWords.indices {
+                if referenceWords[referenceIndex] == hypothesisWords[hypothesisIndex] {
+                    current[hypothesisIndex + 1] = previous[hypothesisIndex]
+                } else {
+                    current[hypothesisIndex + 1] = min(
+                        previous[hypothesisIndex],
+                        previous[hypothesisIndex + 1],
+                        current[hypothesisIndex]
+                    ) + 1
+                }
+            }
+            swap(&previous, &current)
+        }
+
+        return previous[hypothesisWords.count]
+    }
+
     public static func numberTokens(in text: String) -> [String] {
         normalizedWords(in: text).filter { token in
             token.unicodeScalars.contains(where: CharacterSet.decimalDigits.contains)

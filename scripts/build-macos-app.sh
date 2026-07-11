@@ -10,9 +10,9 @@ if [[ -z "${DEVELOPER_DIR:-}" && -d "$DEFAULT_XCODE" ]]; then
 fi
 
 cd "$ROOT_DIR"
-swift build -c debug --product ClassBridgeMac
+swift build --disable-sandbox -c debug --product ClassBridgeMac
 
-BIN_DIR="$(swift build -c debug --show-bin-path)"
+BIN_DIR="$(swift build --disable-sandbox -c debug --show-bin-path)"
 APP_DIR="$ROOT_DIR/.build/LecCue.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"

@@ -56,8 +56,10 @@ private struct BenchmarkReport: Codable {
     var referenceSegmentCount: Int
     var hypothesisSegmentCount: Int
     var agreementWindowSeconds: Double
-    var competitorAgreementWordErrors: WordErrorBreakdown
-    var competitorAgreementWordErrorRate: Double
+    var globalAgreementWordDistance: Int
+    var globalAgreementWordErrorRate: Double
+    var competitorAgreementWordErrors: WordErrorBreakdown?
+    var competitorAgreementWordErrorRate: Double?
     var normalizedWordCoverage: WordCoverageMetrics
     var numberRecall: TokenRecallMetrics
     var acronymRecall: TokenRecallMetrics
@@ -74,7 +76,7 @@ private enum BenchmarkError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidArguments:
-            return "Usage: swift run LecCueBenchmark [--model eou120m|unified640|unified1120|nemotron1120] [--audio raw|adaptive] <reference.json> <audio-file> <report.json>"
+            return "Usage: swift run LecCueBenchmark [--model eou120m|unified640|unified1120|unifiedOffline|nemotron1120] [--audio raw|adaptive] <reference.json> <audio-file> <report.json>"
         case let .recognitionFailed(message):
             return "Recognition failed: \(message)"
         }
@@ -85,6 +87,7 @@ private enum BenchmarkModel: String {
     case eou120m
     case unified640
     case unified1120
+    case unifiedOffline
     case nemotron1120
 
     var displayName: String {
@@ -95,6 +98,8 @@ private enum BenchmarkModel: String {
             return FluidAudioStreamingProfile.unified640ms.displayName
         case .unified1120:
             return FluidAudioStreamingProfile.unified1120ms.displayName
+        case .unifiedOffline:
+            return FluidAudioStreamingProfile.unifiedOffline15s.displayName
         case .nemotron1120:
             return FluidAudioStreamingProfile.nemotron1120ms.displayName
         }
@@ -108,9 +113,15 @@ private enum BenchmarkModel: String {
             return FluidAudioStreamingRecognitionEngine(profile: .unified640ms)
         case .unified1120:
             return FluidAudioStreamingRecognitionEngine(profile: .unified1120ms)
+        case .unifiedOffline:
+            return FluidAudioStreamingRecognitionEngine(profile: .unifiedOffline15s)
         case .nemotron1120:
             return FluidAudioStreamingRecognitionEngine(profile: .nemotron1120ms)
         }
+    }
+
+    var supportsTimestampWindows: Bool {
+        self != .unifiedOffline
     }
 }
 
@@ -263,17 +274,28 @@ private struct LecCueBenchmark {
         await eventTask.value
         let inferenceSeconds = Date().timeIntervalSince(inferenceStartedAt)
         let hypothesisSegments = try await collector.result()
-        let windows = makeWindowReports(
-            reference: reference.segments,
-            hypothesis: hypothesisSegments,
-            durationSeconds: max(reference.session.durationSeconds, audioDurationSeconds)
-        )
-        let aggregateErrors = windows.reduce(WordErrorBreakdown()) { partial, window in
-            partial.adding(window.wordErrors)
-        }
-
         let referenceText = reference.segments.map(\.text).joined(separator: " ")
         let hypothesisText = hypothesisSegments.map(\.text).joined(separator: " ")
+        let globalDistance = TranscriptComparison.wordEditDistance(
+            reference: referenceText,
+            hypothesis: hypothesisText
+        )
+        let referenceWordCount = TranscriptComparison.normalizedWords(in: referenceText).count
+        let globalErrorRate = referenceWordCount > 0
+            ? Double(globalDistance) / Double(referenceWordCount)
+            : (hypothesisText.isEmpty ? 0 : 1)
+        let windows = options.model.supportsTimestampWindows
+            ? makeWindowReports(
+                reference: reference.segments,
+                hypothesis: hypothesisSegments,
+                durationSeconds: max(reference.session.durationSeconds, audioDurationSeconds)
+            )
+            : []
+        let aggregateErrors = options.model.supportsTimestampWindows
+            ? windows.reduce(WordErrorBreakdown()) { partial, window in
+                partial.adding(window.wordErrors)
+            }
+            : nil
         let numberRecall = TranscriptComparison.tokenRecall(
             referenceTokens: TranscriptComparison.numberTokens(in: referenceText),
             hypothesisTokens: TranscriptComparison.numberTokens(in: hypothesisText)
@@ -288,7 +310,7 @@ private struct LecCueBenchmark {
         )
 
         let report = BenchmarkReport(
-            schemaVersion: 3,
+            schemaVersion: 4,
             generatedAt: Date(),
             referenceKind: "LecSync competitor output; not manually corrected ground truth",
             referenceSession: reference.session,
@@ -302,8 +324,10 @@ private struct LecCueBenchmark {
             referenceSegmentCount: reference.segments.count,
             hypothesisSegmentCount: hypothesisSegments.count,
             agreementWindowSeconds: 300,
+            globalAgreementWordDistance: globalDistance,
+            globalAgreementWordErrorRate: globalErrorRate,
             competitorAgreementWordErrors: aggregateErrors,
-            competitorAgreementWordErrorRate: aggregateErrors.errorRate,
+            competitorAgreementWordErrorRate: aggregateErrors?.errorRate,
             normalizedWordCoverage: normalizedWordCoverage,
             numberRecall: numberRecall,
             acronymRecall: acronymRecall,
@@ -313,6 +337,8 @@ private struct LecCueBenchmark {
             caveats: [
                 "LecSync text is a competitor baseline, not ground truth.",
                 "Word errors are aggregated in five-minute timestamp windows to reduce segment-boundary penalties.",
+                "Global agreement follows transcript word order and is the primary model-comparison metric.",
+                "Timestamp-window diagnostics are omitted for offline transcripts without segment timestamps.",
                 "Word coverage ignores ordering and timestamps; it measures shared vocabulary, not transcription accuracy.",
                 "Number recall compares written forms, so spoken-number versus digit formatting requires inverse text normalization before interpretation.",
                 "Speaker diarization and Chinese translation are not evaluated in this report.",
@@ -329,8 +355,8 @@ private struct LecCueBenchmark {
         try encoder.encode(report).write(to: options.reportURL, options: .atomic)
 
         print(String(
-            format: "LecSync agreement word error rate: %.2f%%",
-            aggregateErrors.errorRate * 100
+            format: "Global LecSync agreement word error rate: %.2f%%",
+            globalErrorRate * 100
         ))
         print(String(format: "Local inference speed: %.2fx realtime", report.realTimeSpeedup))
         print("Model: \(options.model.displayName)")

@@ -38,12 +38,13 @@ swift run LecCueBenchmark \
   BenchmarkResults/Private/<session-id>/report.json
 ```
 
-Available model values are `eou120m`, `unified640`, `unified1120`, and `nemotron1120`. Audio values are `raw` and `adaptive`. High-accuracy models download their private local Core ML assets on first use.
+Available model values are `eou120m`, `unified640`, `unified1120`, `unifiedOffline`, and `nemotron1120`. Audio values are `raw` and `adaptive`. High-accuracy models download their private local Core ML assets on first use. The offline model buffers the complete audio and emits its transcript only at finish.
 
 The report includes:
 
 - Word substitutions, deletions, and insertions in five-minute windows.
 - Agreement error rate against LecSync output.
+- Global word-sequence edit distance, used as the primary cross-model comparison.
 - Timestamp-independent normalized-word coverage (precision, recall, and F1).
 - Number and acronym recall.
 - Audio decoding, model loading, and inference time.
@@ -53,6 +54,18 @@ The report includes:
 Five-minute windows reduce false penalties when the two products choose different subtitle boundaries. Word coverage is a second diagnostic that ignores order and timestamps; it shows whether both transcripts contain similar vocabulary, but it is not an accuracy score.
 
 Number recall currently compares written tokens exactly. A result such as spoken `twenty twenty-six` versus `2026` is counted as a miss until inverse text normalization is added.
+
+## Current model decision
+
+The July 2026 59-minute local comparison against the same LecSync transcript produced:
+
+| LecCue model | Global agreement error | Speed |
+| --- | ---: | ---: |
+| Unified 640 ms streaming | 22.01% | 7.62x realtime |
+| Unified 1120 ms streaming | 17.71% | 7.29x realtime |
+| Unified offline 15 s | 15.63% | 74.69x realtime |
+
+This is agreement with competitor output, not ground-truth WER. It supports using Unified 1120 ms for live high-accuracy subtitles and Unified offline 15 s as an automatic post-session refinement. The offline pass improved global agreement error by 2.08 percentage points, or about 11.7% relative, over the 1120 ms stream. A manually corrected reference remains necessary before treating the numbers as release-quality accuracy.
 
 ## Ground truth
 
