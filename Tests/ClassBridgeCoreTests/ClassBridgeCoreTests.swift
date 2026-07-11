@@ -64,6 +64,29 @@ final class ClassBridgeCoreTests: XCTestCase {
         )
     }
 
+    func testTranscriptComparisonEvaluationTreatsFormattingAsEquivalent() {
+        XCTAssertEqual(
+            TranscriptComparison.evaluationWords(
+                in: "It's 12:00 p.m. and A.I."
+            ),
+            ["its", "12", "pm", "and", "ai"]
+        )
+        XCTAssertEqual(
+            TranscriptComparison.evaluationWordEditDistance(
+                reference: "It's 12:00 p.m. and A.I.",
+                hypothesis: "Its 12 pm and AI."
+            ),
+            0
+        )
+    }
+
+    func testTranscriptComparisonCanonicalizesDottedAcronyms() {
+        XCTAssertEqual(
+            TranscriptComparison.acronymTokens(in: "AI A.I. STEM LG01"),
+            ["ai", "ai", "stem", "lg01"]
+        )
+    }
+
     func testTranscriptComparisonCountsWordOperations() {
         let result = TranscriptComparison.wordErrors(
             reference: "the cat sat",
@@ -206,6 +229,50 @@ final class ClassBridgeCoreTests: XCTestCase {
         XCTAssertTrue(Course(name: "Mobile Computing").isReadyToStart)
     }
 
+    func testCourseDecodesLegacyDataWithoutRecognitionTerms() throws {
+        let data = Data(
+            #"""
+            {
+              "id": "00000000-0000-0000-0000-000000000001",
+              "name": "Architecture",
+              "lecturerNames": [],
+              "targetLanguage": "zh-Hans",
+              "contextMaturity": 0
+            }
+            """#.utf8
+        )
+
+        let course = try JSONDecoder().decode(Course.self, from: data)
+
+        XCTAssertNil(course.recognitionTerms)
+    }
+
+    func testTranscriptTermNormalizerRepairsCloseCourseTerms() {
+        let normalizer = TranscriptTermNormalizer(
+            preferredTerms: ["MyWaikato", "Waikato", "Panopto", "Moodle"]
+        )
+
+        XCTAssertEqual(
+            normalizer.normalize("Open My Way Kato for the Waykato timetable."),
+            "Open MyWaikato for the Waikato timetable."
+        )
+        XCTAssertEqual(
+            normalizer.normalize("The mobile lab uses a model."),
+            "The mobile lab uses a model."
+        )
+    }
+
+    func testTranscriptTermNormalizerUsesCourseNameConservatively() {
+        let normalizer = TranscriptTermNormalizer(
+            course: Course(name: "Mobile Computing and Software Architecture")
+        )
+
+        XCTAssertEqual(
+            normalizer.normalize("We study software architectur patterns."),
+            "We study Software Architecture patterns."
+        )
+    }
+
     func testRecognitionConfigurationUsesOnlyApprovedTerms() {
         let approved = GlossaryTerm(
             source: "event loop",
@@ -286,6 +353,37 @@ final class ClassBridgeCoreTests: XCTestCase {
         XCTAssertEqual(snapshot.finalSegments.count, 1)
         XCTAssertEqual(snapshot.finalSegments[0].translatedText, "译文：The event loop schedules callbacks.")
         XCTAssertEqual(snapshot.finalSegments[0].state, .translated)
+    }
+
+    func testPipelineNormalizesPreferredCourseTermsBeforeTranslation() async {
+        let pipeline = SubtitlePipeline(
+            course: Course(
+                name: "Software Architecture",
+                recognitionTerms: ["MyWaikato"]
+            ),
+            translationEngine: TestTranslationEngine()
+        )
+
+        await pipeline.consume(
+            .final(
+                id: UUID(),
+                text: "Open My Way Kato for the timetable.",
+                startTime: 0,
+                endTime: 2,
+                speaker: nil,
+                provider: "test"
+            )
+        )
+        let snapshot = await pipeline.currentSnapshot()
+
+        XCTAssertEqual(
+            snapshot.finalSegments.first?.sourceText,
+            "Open MyWaikato for the timetable."
+        )
+        XCTAssertEqual(
+            snapshot.finalSegments.first?.translatedText,
+            "译文：Open MyWaikato for the timetable."
+        )
     }
 
     func testPipelineReplacesRealtimeTranscriptWithChunkedOfflineTranscript() async {

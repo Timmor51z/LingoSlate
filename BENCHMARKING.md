@@ -22,7 +22,7 @@ The command creates:
 
 ```text
 Benchmarks/Private/<session-id>/reference.json
-Benchmarks/Private/<session-id>/audio.mp3
+Benchmarks/Private/<session-id>/audio-16k.wav
 ```
 
 The reference retains only session metadata and segment-level English, Chinese, speaker, timestamps, and confidence.
@@ -34,17 +34,20 @@ swift run LecCueBenchmark \
   --model eou120m \
   --audio raw \
   Benchmarks/Private/<session-id>/reference.json \
-  Benchmarks/Private/<session-id>/audio.mp3 \
+  Benchmarks/Private/<session-id>/audio-16k.wav \
   BenchmarkResults/Private/<session-id>/report.json
 ```
 
 Available model values are `eou120m`, `unified640`, `unified1120`, `unifiedOffline`, and `nemotron1120`. Audio values are `raw` and `adaptive`. High-accuracy models download their private local Core ML assets on first use. The offline model buffers the complete audio and emits its transcript only at finish.
 
+The preparation script converts the downloaded source to 16 kHz mono PCM WAV. The benchmark intentionally rejects compressed input because AVFoundation can terminate the process instead of returning a recoverable decoding error for malformed or decoder-incompatible files.
+
 The report includes:
 
 - Word substitutions, deletions, and insertions in five-minute windows.
 - Agreement error rate against LecSync output.
-- Global word-sequence edit distance, used as the primary cross-model comparison.
+- Format-normalized global word-sequence edit distance, used as the primary cross-model comparison.
+- Literal global word-sequence distance for auditing normalization effects.
 - Timestamp-independent normalized-word coverage (precision, recall, and F1).
 - Number and acronym recall.
 - Audio decoding, model loading, and inference time.
@@ -61,11 +64,13 @@ The July 2026 59-minute local comparison against the same LecSync transcript pro
 
 | LecCue model | Global agreement error | Speed |
 | --- | ---: | ---: |
-| Unified 640 ms streaming | 22.01% | 7.62x realtime |
-| Unified 1120 ms streaming | 17.71% | 7.29x realtime |
-| Unified offline 15 s | 15.63% | 74.69x realtime |
+| Unified 640 ms streaming | 22.11% | 7.62x realtime |
+| Unified 1120 ms streaming | 17.85% | 7.29x realtime |
+| Unified offline 15 s | 15.75% | 74.69x realtime |
 
-This is agreement with competitor output, not ground-truth WER. It supports using Unified 1120 ms for live high-accuracy subtitles and Unified offline 15 s as an automatic post-session refinement. The offline pass improved global agreement error by 2.08 percentage points, or about 11.7% relative, over the 1120 ms stream. A manually corrected reference remains necessary before treating the numbers as release-quality accuracy.
+This is format-normalized agreement with competitor output, not ground-truth WER. It supports using Unified 1120 ms for live high-accuracy subtitles and Unified offline 15 s as an automatic post-session refinement. The offline pass improved global agreement error by 2.10 percentage points, or about 11.7% relative, over the 1120 ms stream. A manually corrected reference remains necessary before treating the numbers as release-quality accuracy.
+
+Adaptive gain was also tested across the complete recording with the offline model. It worsened agreement from 15.75% to 16.71% and reduced throughput to 23.14x realtime, so high-accuracy mode intentionally keeps the raw 16 kHz signal. Adaptive gain remains limited to the 120M energy-saving path where it previously improved quiet-speech coverage.
 
 ## Ground truth
 

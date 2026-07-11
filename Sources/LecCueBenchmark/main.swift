@@ -1,5 +1,6 @@
 import ClassBridgeAudio
 import ClassBridgeCore
+import Darwin
 import FluidAudio
 import Foundation
 
@@ -56,8 +57,11 @@ private struct BenchmarkReport: Codable {
     var referenceSegmentCount: Int
     var hypothesisSegmentCount: Int
     var agreementWindowSeconds: Double
+    var normalizationProfile: String
     var globalAgreementWordDistance: Int
     var globalAgreementWordErrorRate: Double
+    var literalGlobalAgreementWordDistance: Int
+    var literalGlobalAgreementWordErrorRate: Double
     var competitorAgreementWordErrors: WordErrorBreakdown?
     var competitorAgreementWordErrorRate: Double?
     var normalizedWordCoverage: WordCoverageMetrics
@@ -72,6 +76,7 @@ private struct BenchmarkReport: Codable {
 private enum BenchmarkError: LocalizedError {
     case invalidArguments
     case recognitionFailed(String)
+    case unsupportedAudioFormat(String)
 
     var errorDescription: String? {
         switch self {
@@ -79,6 +84,9 @@ private enum BenchmarkError: LocalizedError {
             return "Usage: swift run LecCueBenchmark [--model eou120m|unified640|unified1120|unifiedOffline|nemotron1120] [--audio raw|adaptive] <reference.json> <audio-file> <report.json>"
         case let .recognitionFailed(message):
             return "Recognition failed: \(message)"
+        case let .unsupportedAudioFormat(fileExtension):
+            return "Unsupported benchmark audio format '.\(fileExtension)'. "
+                + "Convert input to 16 kHz mono PCM WAV first."
         }
     }
 }
@@ -209,13 +217,31 @@ private actor RecognitionCollector {
 
 @main
 private struct LecCueBenchmark {
-    static func main() async throws {
+    static func main() async {
+        do {
+            try await run()
+        } catch {
+            let message = "LecCueBenchmark: \(error.localizedDescription)\n"
+            FileHandle.standardError.write(Data(message.utf8))
+            exit(EXIT_FAILURE)
+        }
+    }
+
+    private static func run() async throws {
         let options = try BenchmarkOptions.parse(Array(CommandLine.arguments.dropFirst()))
         let decoder = JSONDecoder()
         let reference = try decoder.decode(
             LecSyncReference.self,
             from: Data(contentsOf: options.referenceURL)
         )
+
+        let supportedAudioExtensions: Set<String> = [
+            "wav", "wave", "caf", "aif", "aiff",
+        ]
+        let audioExtension = options.audioURL.pathExtension.lowercased()
+        guard supportedAudioExtensions.contains(audioExtension) else {
+            throw BenchmarkError.unsupportedAudioFormat(audioExtension)
+        }
 
         let decodeStartedAt = Date()
         let samples = try AudioConverter().resampleAudioFile(options.audioURL)
@@ -276,13 +302,23 @@ private struct LecCueBenchmark {
         let hypothesisSegments = try await collector.result()
         let referenceText = reference.segments.map(\.text).joined(separator: " ")
         let hypothesisText = hypothesisSegments.map(\.text).joined(separator: " ")
-        let globalDistance = TranscriptComparison.wordEditDistance(
+        let globalDistance = TranscriptComparison.evaluationWordEditDistance(
             reference: referenceText,
             hypothesis: hypothesisText
         )
-        let referenceWordCount = TranscriptComparison.normalizedWords(in: referenceText).count
+        let referenceWordCount = TranscriptComparison.evaluationWords(in: referenceText).count
         let globalErrorRate = referenceWordCount > 0
             ? Double(globalDistance) / Double(referenceWordCount)
+            : (hypothesisText.isEmpty ? 0 : 1)
+        let literalGlobalDistance = TranscriptComparison.wordEditDistance(
+            reference: referenceText,
+            hypothesis: hypothesisText
+        )
+        let literalReferenceWordCount = TranscriptComparison.normalizedWords(
+            in: referenceText
+        ).count
+        let literalGlobalErrorRate = literalReferenceWordCount > 0
+            ? Double(literalGlobalDistance) / Double(literalReferenceWordCount)
             : (hypothesisText.isEmpty ? 0 : 1)
         let windows = options.model.supportsTimestampWindows
             ? makeWindowReports(
@@ -297,12 +333,12 @@ private struct LecCueBenchmark {
             }
             : nil
         let numberRecall = TranscriptComparison.tokenRecall(
-            referenceTokens: TranscriptComparison.numberTokens(in: referenceText),
-            hypothesisTokens: TranscriptComparison.numberTokens(in: hypothesisText)
+            referenceTokens: TranscriptComparison.evaluationNumberTokens(in: referenceText),
+            hypothesisTokens: TranscriptComparison.evaluationNumberTokens(in: hypothesisText)
         )
         let acronymRecall = TranscriptComparison.tokenRecall(
             referenceTokens: TranscriptComparison.acronymTokens(in: referenceText),
-            hypothesisTokens: TranscriptComparison.normalizedWords(in: hypothesisText)
+            hypothesisTokens: TranscriptComparison.evaluationWords(in: hypothesisText)
         )
         let normalizedWordCoverage = TranscriptComparison.wordCoverage(
             reference: referenceText,
@@ -310,7 +346,7 @@ private struct LecCueBenchmark {
         )
 
         let report = BenchmarkReport(
-            schemaVersion: 4,
+            schemaVersion: 5,
             generatedAt: Date(),
             referenceKind: "LecSync competitor output; not manually corrected ground truth",
             referenceSession: reference.session,
@@ -324,8 +360,12 @@ private struct LecCueBenchmark {
             referenceSegmentCount: reference.segments.count,
             hypothesisSegmentCount: hypothesisSegments.count,
             agreementWindowSeconds: 300,
+            normalizationProfile: "case-folded alphanumeric words; contractions, "
+                + "dotted acronyms, and whole-hour times canonicalized",
             globalAgreementWordDistance: globalDistance,
             globalAgreementWordErrorRate: globalErrorRate,
+            literalGlobalAgreementWordDistance: literalGlobalDistance,
+            literalGlobalAgreementWordErrorRate: literalGlobalErrorRate,
             competitorAgreementWordErrors: aggregateErrors,
             competitorAgreementWordErrorRate: aggregateErrors?.errorRate,
             normalizedWordCoverage: normalizedWordCoverage,
@@ -338,6 +378,9 @@ private struct LecCueBenchmark {
                 "LecSync text is a competitor baseline, not ground truth.",
                 "Word errors are aggregated in five-minute timestamp windows to reduce segment-boundary penalties.",
                 "Global agreement follows transcript word order and is the primary model-comparison metric.",
+                "Primary global agreement removes formatting-only differences in "
+                    + "contractions, dotted acronyms, and whole-hour times; literal "
+                    + "global agreement is retained separately.",
                 "Timestamp-window diagnostics are omitted for offline transcripts without segment timestamps.",
                 "Word coverage ignores ordering and timestamps; it measures shared vocabulary, not transcription accuracy.",
                 "Number recall compares written forms, so spoken-number versus digit formatting requires inverse text normalization before interpretation.",

@@ -5,6 +5,7 @@ public actor SubtitlePipeline {
     private let translationEngine: any TranslationEngine
     private let approvedTerms: [GlossaryTerm]
     private let recentContextLimit: Int
+    private let termNormalizer: TranscriptTermNormalizer
 
     private var finalSegments: [TranscriptSegment] = []
     private var provisionalSegment: TranscriptSegment?
@@ -20,6 +21,7 @@ public actor SubtitlePipeline {
         self.translationEngine = translationEngine
         self.approvedTerms = approvedTerms.filter(\.isApproved)
         self.recentContextLimit = max(0, recentContextLimit)
+        self.termNormalizer = TranscriptTermNormalizer(course: course)
     }
 
     public func snapshots() -> AsyncStream<TranscriptSnapshot> {
@@ -59,12 +61,13 @@ public actor SubtitlePipeline {
 
         case let .final(id, text, startTime, endTime, speaker, provider):
             provisionalSegment = nil
+            let normalizedText = termNormalizer.normalize(text)
 
             let segment = TranscriptSegment(
                 id: id,
                 startTime: startTime,
                 endTime: endTime,
-                sourceText: text,
+                sourceText: normalizedText,
                 speaker: speaker,
                 state: .final,
                 provider: provider
@@ -81,7 +84,10 @@ public actor SubtitlePipeline {
             )
 
             do {
-                let translation = try await translationEngine.translate(text, context: context)
+                let translation = try await translationEngine.translate(
+                    normalizedText,
+                    context: context
+                )
                 applyTranslation(translation, to: id)
                 publish()
             } catch {
@@ -111,7 +117,8 @@ public actor SubtitlePipeline {
         provider: String,
         maximumWordsPerSegment: Int = 80
     ) async -> Bool {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = termNormalizer.normalize(text)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty,
               !finalSegments.contains(where: \.isUserCorrected) else {
             return false

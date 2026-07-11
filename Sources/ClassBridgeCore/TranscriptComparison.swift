@@ -115,36 +115,59 @@ public enum TranscriptComparison {
         )
     }
 
+    public static func evaluationWords(in text: String) -> [String] {
+        let mutableText = NSMutableString(
+            string: text.precomposedStringWithCanonicalMapping
+        )
+        let fullRange = NSRange(location: 0, length: mutableText.length)
+        let wholeHourTimes = try! NSRegularExpression(
+            pattern: #"\b([0-9]{1,2}):00\b"#
+        )
+        wholeHourTimes.replaceMatches(
+            in: mutableText,
+            range: fullRange,
+            withTemplate: "$1"
+        )
+
+        let innerPunctuation = try! NSRegularExpression(
+            pattern: #"(?<=[\p{L}])['’.](?=[\p{L}])"#
+        )
+        innerPunctuation.replaceMatches(
+            in: mutableText,
+            range: NSRange(location: 0, length: mutableText.length),
+            withTemplate: ""
+        )
+        return normalizedWords(in: mutableText as String)
+    }
+
     public static func wordEditDistance(
         reference: String,
         hypothesis: String
     ) -> Int {
-        let referenceWords = normalizedWords(in: reference)
-        let hypothesisWords = normalizedWords(in: hypothesis)
-        var previous = Array(0...hypothesisWords.count)
-        var current = [Int](repeating: 0, count: hypothesisWords.count + 1)
+        wordEditDistance(
+            referenceWords: normalizedWords(in: reference),
+            hypothesisWords: normalizedWords(in: hypothesis)
+        )
+    }
 
-        for referenceIndex in referenceWords.indices {
-            current[0] = referenceIndex + 1
-            for hypothesisIndex in hypothesisWords.indices {
-                if referenceWords[referenceIndex] == hypothesisWords[hypothesisIndex] {
-                    current[hypothesisIndex + 1] = previous[hypothesisIndex]
-                } else {
-                    current[hypothesisIndex + 1] = min(
-                        previous[hypothesisIndex],
-                        previous[hypothesisIndex + 1],
-                        current[hypothesisIndex]
-                    ) + 1
-                }
-            }
-            swap(&previous, &current)
-        }
-
-        return previous[hypothesisWords.count]
+    public static func evaluationWordEditDistance(
+        reference: String,
+        hypothesis: String
+    ) -> Int {
+        wordEditDistance(
+            referenceWords: evaluationWords(in: reference),
+            hypothesisWords: evaluationWords(in: hypothesis)
+        )
     }
 
     public static func numberTokens(in text: String) -> [String] {
         normalizedWords(in: text).filter { token in
+            token.unicodeScalars.contains(where: CharacterSet.decimalDigits.contains)
+        }
+    }
+
+    public static func evaluationNumberTokens(in text: String) -> [String] {
+        evaluationWords(in: text).filter { token in
             token.unicodeScalars.contains(where: CharacterSet.decimalDigits.contains)
         }
     }
@@ -158,7 +181,9 @@ public enum TranscriptComparison {
             let hasLowercase = letters.contains { CharacterSet.lowercaseLetters.contains($0) }
             let uppercaseCount = letters.count(where: CharacterSet.uppercaseLetters.contains)
             guard !hasLowercase, uppercaseCount >= 2 else { return nil }
-            return token.lowercased()
+            return token.unicodeScalars.filter {
+                CharacterSet.alphanumerics.contains($0)
+            }.map(String.init).joined().lowercased()
         }
     }
 
@@ -284,5 +309,31 @@ public enum TranscriptComparison {
             referenceWordCount: referenceWords.count,
             hypothesisWordCount: hypothesisWords.count
         )
+    }
+
+    private static func wordEditDistance(
+        referenceWords: [String],
+        hypothesisWords: [String]
+    ) -> Int {
+        var previous = Array(0...hypothesisWords.count)
+        var current = [Int](repeating: 0, count: hypothesisWords.count + 1)
+
+        for referenceIndex in referenceWords.indices {
+            current[0] = referenceIndex + 1
+            for hypothesisIndex in hypothesisWords.indices {
+                if referenceWords[referenceIndex] == hypothesisWords[hypothesisIndex] {
+                    current[hypothesisIndex + 1] = previous[hypothesisIndex]
+                } else {
+                    current[hypothesisIndex + 1] = min(
+                        previous[hypothesisIndex],
+                        previous[hypothesisIndex + 1],
+                        current[hypothesisIndex]
+                    ) + 1
+                }
+            }
+            swap(&previous, &current)
+        }
+
+        return previous[hypothesisWords.count]
     }
 }

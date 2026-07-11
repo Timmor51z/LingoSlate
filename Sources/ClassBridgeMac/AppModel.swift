@@ -6,6 +6,7 @@ import Foundation
 @MainActor
 final class AppModel: ObservableObject {
     @Published var courseName = "Mobile Computing and Software Architecture"
+    @Published var courseTermsText = ""
     @Published var sessionKind: SessionKind = .lecture
     @Published var processingMode: ProcessingMode = .highAccuracy
     @Published var audioSource: AudioSource = .microphone
@@ -63,7 +64,10 @@ final class AppModel: ObservableObject {
     func startSession() {
         guard canStart else { return }
 
-        let course = Course(name: courseName)
+        let course = Course(
+            name: courseName,
+            recognitionTerms: parsedCourseTerms
+        )
         let configuration = SessionConfiguration(
             course: course,
             kind: sessionKind,
@@ -319,6 +323,19 @@ final class AppModel: ObservableObject {
     private func isFailure(_ state: SessionLifecycleState) -> Bool {
         if case .failed = state { return true }
         return false
+    }
+
+    private var parsedCourseTerms: [String] {
+        var seen: Set<String> = []
+        return courseTermsText.split { character in
+            character == "," || character == ";" || character.isNewline
+        }.compactMap { rawTerm in
+            let term = String(rawTerm).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty else { return nil }
+            let key = term.lowercased()
+            guard seen.insert(key).inserted else { return nil }
+            return term
+        }
     }
 
     private func runPostClassOptimization(

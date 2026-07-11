@@ -16,8 +16,9 @@ This repository currently contains the first local microphone vertical slice:
 - FluidAudio Parakeet Unified 0.6B high-accuracy streaming recognition at 1120 ms context.
 - An automatic full-context offline transcription pass before high-accuracy sessions are saved.
 - In-memory session audio buffering that is released after the offline pass and never persisted.
+- Conservative course-name and optional term normalization for proper nouns and technical vocabulary.
 - A native SwiftUI macOS workspace with live input level and real subtitle events.
-- Twenty unit tests across the shared core and audio buffer.
+- Twenty-six unit tests across the shared core and audio buffer.
 
 Energy-saving mode downloads an approximately 120 MB model. High-accuracy mode progressively caches approximately 1.2 GB for its real-time and after-class encoders, then starts from the local Core ML cache. A one-hour 16 kHz mono session uses about 230 MB of temporary memory for the after-class pass. Audio and recognition remain on the Mac. Chinese translation is still a placeholder and is the next production adapter.
 

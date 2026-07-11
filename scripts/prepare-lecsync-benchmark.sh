@@ -16,7 +16,7 @@ if [[ ! -f "$SOURCE_JSON" ]]; then
     exit 66
 fi
 
-for command_name in jq curl; do
+for command_name in jq curl ffmpeg; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
         echo "Required command not found: $command_name" >&2
         exit 69
@@ -38,9 +38,11 @@ fi
 
 OUTPUT_DIR="$ROOT_DIR/Benchmarks/Private/$SESSION_ID"
 REFERENCE_PATH="$OUTPUT_DIR/reference.json"
-AUDIO_PATH="$OUTPUT_DIR/audio.mp3"
+AUDIO_SOURCE_PATH="$OUTPUT_DIR/audio.mp3"
+AUDIO_PATH="$OUTPUT_DIR/audio-16k.wav"
 REFERENCE_TMP="$REFERENCE_PATH.tmp"
-AUDIO_TMP="$AUDIO_PATH.part"
+AUDIO_SOURCE_TMP="$AUDIO_SOURCE_PATH.part"
+AUDIO_TMP="$AUDIO_PATH.part.wav"
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -68,15 +70,27 @@ jq '{
 }' "$SOURCE_JSON" > "$REFERENCE_TMP"
 mv "$REFERENCE_TMP" "$REFERENCE_PATH"
 
-if [[ ! -f "$AUDIO_PATH" ]]; then
+if [[ ! -f "$AUDIO_SOURCE_PATH" ]]; then
     AUDIO_URL="$(jq -er '.audioUrl | select(startswith("https://"))' "$SOURCE_JSON")"
     curl \
         --fail \
         --location \
         --retry 3 \
         --continue-at - \
-        --output "$AUDIO_TMP" \
+        --output "$AUDIO_SOURCE_TMP" \
         "$AUDIO_URL"
+    mv "$AUDIO_SOURCE_TMP" "$AUDIO_SOURCE_PATH"
+fi
+
+if [[ ! -f "$AUDIO_PATH" ]]; then
+    ffmpeg \
+        -y \
+        -v error \
+        -i "$AUDIO_SOURCE_PATH" \
+        -ar 16000 \
+        -ac 1 \
+        -c:a pcm_s16le \
+        "$AUDIO_TMP"
     mv "$AUDIO_TMP" "$AUDIO_PATH"
 fi
 

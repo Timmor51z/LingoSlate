@@ -8,6 +8,8 @@ struct ClassroomWorkspaceView: View {
         VStack(spacing: 0) {
             sessionToolbar
             Divider()
+            courseContextBar
+            Divider()
             statusBar
             Divider()
             transcriptSurface
@@ -16,6 +18,21 @@ struct ClassroomWorkspaceView: View {
         }
         .frame(minWidth: 860, minHeight: 560)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var courseContextBar: some View {
+        HStack(spacing: 10) {
+            Label("课程术语", systemImage: "text.book.closed")
+                .foregroundStyle(.secondary)
+
+            TextField("Waikato, MyWaikato, Panopto", text: $model.courseTermsText)
+                .textFieldStyle(.plain)
+                .disabled(model.isActive)
+        }
+        .font(.callout)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     private var sessionToolbar: some View {

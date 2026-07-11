@@ -7,6 +7,7 @@ public struct Course: Codable, Hashable, Identifiable, Sendable {
     public var roughDescription: String?
     public var domain: String?
     public var lecturerNames: [String]
+    public var recognitionTerms: [String]?
     public var targetLanguage: String
     public var contextMaturity: Int
 
@@ -17,6 +18,7 @@ public struct Course: Codable, Hashable, Identifiable, Sendable {
         roughDescription: String? = nil,
         domain: String? = nil,
         lecturerNames: [String] = [],
+        recognitionTerms: [String] = [],
         targetLanguage: String = "zh-Hans",
         contextMaturity: Int = 0
     ) {
@@ -26,6 +28,8 @@ public struct Course: Codable, Hashable, Identifiable, Sendable {
         self.roughDescription = roughDescription?.nilIfBlank
         self.domain = domain?.nilIfBlank
         self.lecturerNames = lecturerNames
+        let recognitionTerms = recognitionTerms.compactMap(\.nilIfBlank)
+        self.recognitionTerms = recognitionTerms.isEmpty ? nil : recognitionTerms
         self.targetLanguage = targetLanguage
         self.contextMaturity = max(0, contextMaturity)
     }
