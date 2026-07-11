@@ -21,18 +21,21 @@ public actor FluidAudioRecognitionEngine: SpeechRecognitionEngine {
     public nonisolated let events: AsyncStream<RecognitionEvent>
 
     private let continuation: AsyncStream<RecognitionEvent>.Continuation
+    private let maximumSegmentDuration: TimeInterval
     private var manager: StreamingEouAsrManager?
     private var currentSegmentID = UUID()
     private var transcriptCursor = IncrementalTranscriptCursor()
+    private var lastProvisionalText = ""
     private var segmentStartTime: TimeInterval = 0
     private var sessionStartTime: TimeInterval?
     private var latestFrameTime: TimeInterval = 0
     private var isFinalized = false
 
-    public init() {
+    public init(maximumSegmentDuration: TimeInterval = 15) {
         let pair = AsyncStream<RecognitionEvent>.makeStream()
         events = pair.stream
         continuation = pair.continuation
+        self.maximumSegmentDuration = max(5, maximumSegmentDuration)
     }
 
     public func start(configuration: RecognitionConfiguration) async throws {
@@ -42,12 +45,6 @@ public actor FluidAudioRecognitionEngine: SpeechRecognitionEngine {
             chunkSize: .ms320,
             eouDebounceMs: 960
         )
-        await manager.setPartialCallback { [weak self] transcript in
-            Task { await self?.receivePartial(transcript) }
-        }
-        await manager.setEouCallback { [weak self] transcript in
-            Task { await self?.receiveEndOfUtterance(transcript) }
-        }
         do {
             try await manager.loadModels()
             try Task.checkCancellation()
@@ -91,6 +88,7 @@ public actor FluidAudioRecognitionEngine: SpeechRecognitionEngine {
 
         try await manager.appendAudio(buffer)
         try await manager.processBufferedAudio()
+        await emitAvailableTranscript(from: manager)
     }
 
     public func finalize() async throws {
@@ -102,6 +100,7 @@ public actor FluidAudioRecognitionEngine: SpeechRecognitionEngine {
                 if let silenceBuffer = makeSilenceBuffer(duration: 1.5) {
                     try await manager.appendAudio(silenceBuffer)
                     try await manager.processBufferedAudio()
+                    await emitAvailableTranscript(from: manager)
                 }
                 let transcript = try await manager.finish()
                 receiveFinalTranscript(transcript)
@@ -118,8 +117,9 @@ public actor FluidAudioRecognitionEngine: SpeechRecognitionEngine {
     }
 
     private func receivePartial(_ transcript: String) {
-        let text = uncommittedSuffix(in: transcript)
-        guard !text.isEmpty else { return }
+        let text = transcriptCursor.uncommittedText(in: transcript)
+        guard !text.isEmpty, text != lastProvisionalText else { return }
+        lastProvisionalText = text
 
         continuation.yield(
             .provisional(
@@ -132,13 +132,10 @@ public actor FluidAudioRecognitionEngine: SpeechRecognitionEngine {
         )
     }
 
-    private func receiveEndOfUtterance(_ transcript: String) {
-        receiveFinalTranscript(transcript)
-    }
-
-    private func receiveFinalTranscript(_ transcript: String) {
-        let text = uncommittedSuffix(in: transcript)
-        guard !text.isEmpty else { return }
+    @discardableResult
+    private func receiveFinalTranscript(_ transcript: String) -> Bool {
+        let text = transcriptCursor.uncommittedText(in: transcript)
+        guard !text.isEmpty else { return false }
 
         continuation.yield(
             .final(
@@ -152,12 +149,35 @@ public actor FluidAudioRecognitionEngine: SpeechRecognitionEngine {
         )
 
         transcriptCursor.commit(transcript)
-        segmentStartTime = latestFrameTime
-        currentSegmentID = UUID()
+        advanceSegmentBoundary()
+        return true
     }
 
-    private func uncommittedSuffix(in transcript: String) -> String {
-        transcriptCursor.uncommittedText(in: transcript)
+    private func emitAvailableTranscript(
+        from manager: StreamingEouAsrManager
+    ) async {
+        let transcript = await manager.getPartialTranscript()
+        let reachedMaximumDuration = latestFrameTime - segmentStartTime >= maximumSegmentDuration
+
+        if await manager.eouDetected {
+            if !receiveFinalTranscript(transcript) {
+                advanceSegmentBoundary()
+            }
+            await manager.reset()
+            transcriptCursor = IncrementalTranscriptCursor()
+        } else if reachedMaximumDuration {
+            if !receiveFinalTranscript(transcript) {
+                advanceSegmentBoundary()
+            }
+        } else {
+            receivePartial(transcript)
+        }
+    }
+
+    private func advanceSegmentBoundary() {
+        lastProvisionalText = ""
+        segmentStartTime = latestFrameTime
+        currentSegmentID = UUID()
     }
 
     private func makeSilenceBuffer(duration: TimeInterval) -> AVAudioPCMBuffer? {

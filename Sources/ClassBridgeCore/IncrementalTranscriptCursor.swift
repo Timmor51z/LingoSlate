@@ -15,15 +15,23 @@ public struct IncrementalTranscriptCursor: Sendable {
 
         let committedWords = words(in: committedTranscript)
         let incomingWords = words(in: normalized)
-        guard incomingWords.count >= committedWords.count else { return normalized }
+        guard incomingWords.count >= committedWords.count else { return "" }
 
         let hasCommittedPrefix = zip(committedWords, incomingWords).allSatisfy { pair in
             comparableToken(pair.0) == comparableToken(pair.1)
         }
-        guard hasCommittedPrefix else { return normalized }
+        let boundary: Int
+        if hasCommittedPrefix {
+            boundary = committedWords.count
+        } else {
+            boundary = anchoredBoundary(
+                committedWords: committedWords,
+                incomingWords: incomingWords
+            ) ?? committedWords.count
+        }
 
         return incomingWords
-            .dropFirst(committedWords.count)
+            .dropFirst(boundary)
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -40,5 +48,32 @@ public struct IncrementalTranscriptCursor: Sendable {
         token
             .lowercased()
             .trimmingCharacters(in: .punctuationCharacters)
+    }
+
+    private func anchoredBoundary(
+        committedWords: [Substring],
+        incomingWords: [Substring]
+    ) -> Int? {
+        let maximumAnchorLength = min(8, committedWords.count)
+        guard maximumAnchorLength >= 2 else { return nil }
+
+        for anchorLength in stride(from: maximumAnchorLength, through: 2, by: -1) {
+            let anchor = committedWords.suffix(anchorLength).map(comparableToken)
+            guard incomingWords.count >= anchorLength else { continue }
+
+            for start in stride(
+                from: incomingWords.count - anchorLength,
+                through: 0,
+                by: -1
+            ) {
+                let candidate = incomingWords[start..<(start + anchorLength)]
+                    .map(comparableToken)
+                if candidate == anchor {
+                    return start + anchorLength
+                }
+            }
+        }
+
+        return nil
     }
 }

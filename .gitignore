@@ -4,3 +4,5 @@
 DerivedData/
 xcuserdata/
 *.xcuserstate
+Benchmarks/Private/
+BenchmarkResults/Private/

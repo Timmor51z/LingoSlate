@@ -14,6 +14,7 @@ let package = Package(
         .library(name: "ClassBridgeAudio", targets: ["ClassBridgeAudio"]),
         .executable(name: "ClassBridgeMac", targets: ["ClassBridgeMac"]),
         .executable(name: "LecCueASRSmoke", targets: ["LecCueASRSmoke"]),
+        .executable(name: "LecCueBenchmark", targets: ["LecCueBenchmark"]),
     ],
     dependencies: [
         .package(
@@ -36,6 +37,14 @@ let package = Package(
         ),
         .executableTarget(
             name: "LecCueASRSmoke",
+            dependencies: [
+                "ClassBridgeCore",
+                "ClassBridgeAudio",
+                .product(name: "FluidAudio", package: "FluidAudio"),
+            ]
+        ),
+        .executableTarget(
+            name: "LecCueBenchmark",
             dependencies: [
                 "ClassBridgeCore",
                 "ClassBridgeAudio",

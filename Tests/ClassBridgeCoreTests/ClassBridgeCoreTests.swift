@@ -2,6 +2,53 @@ import XCTest
 @testable import ClassBridgeCore
 
 final class ClassBridgeCoreTests: XCTestCase {
+    func testTranscriptComparisonNormalizesCaseAndPunctuation() {
+        XCTAssertEqual(
+            TranscriptComparison.normalizedWords(in: "Hello, STEAM! It's 2026."),
+            ["hello", "steam", "it", "s", "2026"]
+        )
+    }
+
+    func testTranscriptComparisonCountsWordOperations() {
+        let result = TranscriptComparison.wordErrors(
+            reference: "the cat sat",
+            hypothesis: "the dog sat there"
+        )
+
+        XCTAssertEqual(result.substitutions, 1)
+        XCTAssertEqual(result.deletions, 0)
+        XCTAssertEqual(result.insertions, 1)
+        XCTAssertEqual(result.totalEdits, 2)
+        XCTAssertEqual(result.errorRate, 2.0 / 3.0, accuracy: 0.0001)
+    }
+
+    func testTranscriptComparisonCriticalTokenRecallUsesCounts() {
+        let reference = ["2026", "steam", "steam"]
+        let hypothesis = ["2026", "steam"]
+        let result = TranscriptComparison.tokenRecall(
+            referenceTokens: reference,
+            hypothesisTokens: hypothesis
+        )
+
+        XCTAssertEqual(result.referenceCount, 3)
+        XCTAssertEqual(result.matchedCount, 2)
+        XCTAssertEqual(result.recall ?? -1, 2.0 / 3.0, accuracy: 0.0001)
+    }
+
+    func testTranscriptComparisonWordCoverageUsesMultisetIntersection() {
+        let result = TranscriptComparison.wordCoverage(
+            reference: "STEAM class class starts now",
+            hypothesis: "Now the STEAM class starts"
+        )
+
+        XCTAssertEqual(result.referenceWordCount, 5)
+        XCTAssertEqual(result.hypothesisWordCount, 5)
+        XCTAssertEqual(result.matchedWordCount, 4)
+        XCTAssertEqual(result.recall ?? -1, 0.8, accuracy: 0.0001)
+        XCTAssertEqual(result.precision ?? -1, 0.8, accuracy: 0.0001)
+        XCTAssertEqual(result.f1 ?? -1, 0.8, accuracy: 0.0001)
+    }
+
     func testAudioFrameNormalizesInputLevel() {
         let silence = AudioFrame(samples: [0, 0, 0], sampleRate: 16_000, capturedAt: 0)
         let loud = AudioFrame(samples: [1, -1, 1, -1], sampleRate: 16_000, capturedAt: 0)
@@ -21,12 +68,40 @@ final class ClassBridgeCoreTests: XCTestCase {
         )
     }
 
-    func testIncrementalTranscriptCursorFallsBackAfterRevision() {
-        let cursor = IncrementalTranscriptCursor(committedTranscript: "The event loop")
+    func testIncrementalTranscriptCursorUsesAnchorAfterLeadingRevision() {
+        let cursor = IncrementalTranscriptCursor(
+            committedTranscript: "The timetable shows every class"
+        )
 
         XCTAssertEqual(
-            cursor.uncommittedText(in: "A callback enters the queue"),
-            "A callback enters the queue"
+            cursor.uncommittedText(
+                in: "Well, the timetable shows every class on campus today"
+            ),
+            "on campus today"
+        )
+    }
+
+    func testIncrementalTranscriptCursorUsesWordPositionAfterRevision() {
+        let cursor = IncrementalTranscriptCursor(
+            committedTranscript: "We use the timetable to find our classes"
+        )
+
+        XCTAssertEqual(
+            cursor.uncommittedText(
+                in: "We use a timetable to find all classes today online"
+            ),
+            "today online"
+        )
+    }
+
+    func testIncrementalTranscriptCursorWaitsForShorterRevision() {
+        let cursor = IncrementalTranscriptCursor(
+            committedTranscript: "The event loop schedules every callback"
+        )
+
+        XCTAssertEqual(
+            cursor.uncommittedText(in: "The event loop schedules"),
+            ""
         )
     }
 

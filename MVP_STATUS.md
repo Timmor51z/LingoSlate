@@ -21,6 +21,9 @@
 - Foreground `LecCue.app` development bundle with microphone usage metadata and ad-hoc signing.
 - Audio-file smoke tool for repeatable local ASR verification.
 - Finalization silence padding so the last spoken word is not truncated.
+- Private LecSync benchmark importer with signed URLs and account metadata removed.
+- Same-audio local benchmark runner with five-minute alignment windows, word coverage, critical-token recall, and runtime measurements.
+- Revision-tolerant streaming transcript cursor that prevents cumulative model output from being emitted twice.
 
 ## Verification status
 
@@ -28,7 +31,7 @@
 - All Swift source files pass `swiftc -parse`.
 - Full package build and tests run with the external Xcode selected through `DEVELOPER_DIR`.
 - `swift test` builds the shared core, Mac executable, and test bundle successfully.
-- All 8 core tests pass, covering audio levels, streaming transcript de-duplication, course readiness, approved terminology, lifecycle transitions, subtitle translation, and JSON persistence.
+- All 14 core tests pass, covering comparison metrics, revised streaming transcripts, audio levels, course readiness, approved terminology, lifecycle transitions, subtitle translation, and JSON persistence.
 
 Set the external Xcode as the active developer directory once:
 
@@ -51,10 +54,10 @@ swift test
 
 ## Next production slice
 
-1. Replace the placeholder translator with Apple `TranslationSession`.
-2. Add model download progress, cancellation, and preflight readiness.
-3. Create the release Xcode target and App Store signing configuration.
-4. Run live subtitle, battery, thermal, and 90-minute soak tests.
-5. Add ScreenCaptureKit system audio after the microphone path passes the soak test.
+1. Evaluate a higher-accuracy local recognizer against the saved private benchmark.
+2. Add inverse text normalization for dates, times, and numbers.
+3. Replace the placeholder translator with Apple `TranslationSession`.
+4. Add model download progress, cancellation, and preflight readiness.
+5. Run live subtitle, battery, thermal, and 90-minute soak tests.
 
 Soniox, automatic course preparation, and summary generation follow after the local bilingual path is stable.
