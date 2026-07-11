@@ -175,8 +175,26 @@ public actor SubtitlePipeline {
                 )
                 applyTranslation(translation, to: segment.id)
                 publish()
+
+                if let refiner = translationEngine as? any TranslationRefinementEngine,
+                   let refined = try? await refiner.refine(
+                    segment.sourceText,
+                    context: context
+                   ),
+                   !refined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    applyTranslation(refined, to: segment.id)
+                    publish()
+                }
             } catch {
-                // Keep the improved English segment. Translation can be retried later.
+                if let refiner = translationEngine as? any TranslationRefinementEngine,
+                   let refined = try? await refiner.refine(
+                    segment.sourceText,
+                    context: context
+                   ),
+                   !refined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    applyTranslation(refined, to: segment.id)
+                    publish()
+                }
             }
         }
         return true
@@ -214,34 +232,53 @@ public actor SubtitlePipeline {
         let token = UUID()
         let engine = translationEngine
         let task = Task { [weak self] in
-            let result: Result<String, Error>
             do {
-                result = .success(try await engine.translate(text, context: context))
+                let translation = try await engine.translate(text, context: context)
+                await self?.publishTranslation(
+                    translation,
+                    segmentID: segmentID,
+                    token: token
+                )
             } catch {
-                result = .failure(error)
+                if let refiner = engine as? any TranslationRefinementEngine,
+                   let refined = try? await refiner.refine(text, context: context) {
+                    await self?.publishTranslation(
+                        refined,
+                        segmentID: segmentID,
+                        token: token
+                    )
+                }
+                await self?.finishTranslation(segmentID: segmentID, token: token)
+                return
             }
-            await self?.completeTranslation(
-                result,
-                segmentID: segmentID,
-                token: token
-            )
+
+            if let refiner = engine as? any TranslationRefinementEngine,
+               let refined = try? await refiner.refine(text, context: context) {
+                await self?.publishTranslation(
+                    refined,
+                    segmentID: segmentID,
+                    token: token
+                )
+            }
+            await self?.finishTranslation(segmentID: segmentID, token: token)
         }
         translationTasks[segmentID] = PendingTranslation(token: token, task: task)
     }
 
-    private func completeTranslation(
-        _ result: Result<String, Error>,
+    private func publishTranslation(
+        _ translation: String,
         segmentID: UUID,
         token: UUID
     ) {
         guard translationTasks[segmentID]?.token == token else { return }
-        translationTasks[segmentID] = nil
+        guard !translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        applyTranslation(translation, to: segmentID)
+        publish()
+    }
 
-        if case let .success(translation) = result,
-           !translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            applyTranslation(translation, to: segmentID)
-            publish()
-        }
+    private func finishTranslation(segmentID: UUID, token: UUID) {
+        guard translationTasks[segmentID]?.token == token else { return }
+        translationTasks[segmentID] = nil
     }
 
     private func cancelPendingTranslations() {

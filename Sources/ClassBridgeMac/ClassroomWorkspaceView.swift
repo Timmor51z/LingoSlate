@@ -128,7 +128,11 @@ struct ClassroomWorkspaceView: View {
             Label(audioSourceLabel, systemImage: "mic.fill")
                 .foregroundStyle(.secondary)
 
-            TranslationStatusLabel(engine: model.translationEngine)
+            TranslationStatusLabel(
+                engine: model.translationEngine,
+                isEnhanced: model.isEnhancedTranslationReady
+                    && model.processingMode == .highAccuracy
+            )
 
             if model.isActive, model.audioSource == .microphone {
                 ProgressView(value: Double(model.inputLevel))
@@ -427,11 +431,16 @@ private struct AppleTranslationSessionHost: View {
 
 private struct TranslationStatusLabel: View {
     @ObservedObject var engine: AppleTranslationEngine
+    let isEnhanced: Bool
 
     var body: some View {
-        Label(engine.statusLabel, systemImage: engine.statusIcon)
+        Label(statusLabel, systemImage: isEnhanced ? "sparkles" : engine.statusIcon)
             .foregroundStyle(statusColor)
-            .help(failureMessage ?? engine.statusLabel)
+            .help(failureMessage ?? statusLabel)
+    }
+
+    private var statusLabel: String {
+        isEnhanced ? "本地精译" : engine.statusLabel
     }
 
     private var statusColor: Color {

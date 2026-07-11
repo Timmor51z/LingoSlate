@@ -3,6 +3,27 @@ import XCTest
 @testable import ClassBridgeMac
 
 final class AppleTranslationEngineTests: XCTestCase {
+    func testTranslateGemmaLocalModelSmokeWhenConfigured() async throws {
+        guard ProcessInfo.processInfo.environment["LECCUE_TRANSLATION_MODEL_PATH"] != nil else {
+            throw XCTSkip("Set LECCUE_TRANSLATION_MODEL_PATH to run the local model smoke test")
+        }
+
+        let engine = TranslateGemmaTranslationEngine()
+        let isReady = await engine.prepare()
+        XCTAssertTrue(isReady)
+
+        let translation = try await engine.translate(
+            "Welcome to the Division. This information is important for your success.",
+            context: TranslationContext(
+                course: Course(name: "STEAM College Orientation"),
+                recentSourceText: []
+            )
+        )
+
+        XCTAssertTrue(translation.contains("欢迎"), translation)
+        XCTAssertTrue(translation.contains("重要"), translation)
+    }
+
     @MainActor
     func testActivationPrefersHighFidelityTranslationOnCurrentSystems() {
         let engine = AppleTranslationEngine()

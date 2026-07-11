@@ -105,6 +105,34 @@ public protocol TranslationEngine: Sendable {
     func translate(_ text: String, context: TranslationContext) async throws -> String
 }
 
+public protocol TranslationRefinementEngine: Sendable {
+    func refine(_ text: String, context: TranslationContext) async throws -> String
+}
+
+public struct StagedTranslationEngine: TranslationEngine, TranslationRefinementEngine {
+    public let identifier: String
+
+    private let primary: any TranslationEngine
+    private let refinement: any TranslationEngine
+
+    public init(
+        primary: any TranslationEngine,
+        refinement: any TranslationEngine
+    ) {
+        self.primary = primary
+        self.refinement = refinement
+        self.identifier = "\(primary.identifier)+\(refinement.identifier)"
+    }
+
+    public func translate(_ text: String, context: TranslationContext) async throws -> String {
+        try await primary.translate(text, context: context)
+    }
+
+    public func refine(_ text: String, context: TranslationContext) async throws -> String {
+        try await refinement.translate(text, context: context)
+    }
+}
+
 public struct SessionSummary: Codable, Hashable, Sendable {
     public var overview: [String]
     public var keyConcepts: [String]

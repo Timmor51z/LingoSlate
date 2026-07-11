@@ -480,6 +480,62 @@ final class ClassBridgeCoreTests: XCTestCase {
         XCTAssertEqual(snapshot.finalSegments.first?.translatedText, "英文字幕不应被翻译阻塞。")
     }
 
+    func testPipelineReplacesPrimaryTranslationWithRefinedTranslation() async {
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Software Architecture"),
+            translationEngine: StagedTranslationEngine(
+                primary: TestTranslationEngine(),
+                refinement: RefinementTranslationEngine()
+            )
+        )
+
+        await pipeline.consume(
+            .final(
+                id: UUID(),
+                text: "The event loop schedules callbacks.",
+                startTime: 0,
+                endTime: 2,
+                speaker: nil,
+                provider: "test"
+            )
+        )
+        await pipeline.finishPendingTranslations()
+        let snapshot = await pipeline.currentSnapshot()
+
+        XCTAssertEqual(
+            snapshot.finalSegments.first?.translatedText,
+            "精译：The event loop schedules callbacks."
+        )
+    }
+
+    func testPipelineUsesRefinementWhenPrimaryTranslationFails() async {
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Software Architecture"),
+            translationEngine: StagedTranslationEngine(
+                primary: FailingTranslationEngine(),
+                refinement: RefinementTranslationEngine()
+            )
+        )
+
+        await pipeline.consume(
+            .final(
+                id: UUID(),
+                text: "Transactions provide atomicity.",
+                startTime: 0,
+                endTime: 2,
+                speaker: nil,
+                provider: "test"
+            )
+        )
+        await pipeline.finishPendingTranslations()
+        let snapshot = await pipeline.currentSnapshot()
+
+        XCTAssertEqual(
+            snapshot.finalSegments.first?.translatedText,
+            "精译：Transactions provide atomicity."
+        )
+    }
+
     func testPipelineReplacesRealtimeTranscriptWithChunkedOfflineTranscript() async {
         let pipeline = SubtitlePipeline(
             course: Course(name: "Concurrency"),
@@ -640,6 +696,26 @@ private struct TestTranslationEngine: TranslationEngine {
     func translate(_ text: String, context: TranslationContext) async throws -> String {
         "译文：\(text)"
     }
+}
+
+private struct RefinementTranslationEngine: TranslationEngine {
+    let identifier = "refinement-test"
+
+    func translate(_ text: String, context: TranslationContext) async throws -> String {
+        "精译：\(text)"
+    }
+}
+
+private struct FailingTranslationEngine: TranslationEngine {
+    let identifier = "failing-test"
+
+    func translate(_ text: String, context: TranslationContext) async throws -> String {
+        throw TestTranslationError.unavailable
+    }
+}
+
+private enum TestTranslationError: Error {
+    case unavailable
 }
 
 private final class DeferredTranslationEngine: TranslationEngine, @unchecked Sendable {

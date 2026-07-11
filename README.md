@@ -20,15 +20,17 @@ This repository currently contains the first local microphone vertical slice:
 - Local user profile settings for school and country or region.
 - Course warmup that prepares editable terms and preloads the selected real-time model.
 - On-device English-to-Simplified-Chinese translation through Apple Translation.
+- Two-stage high-accuracy translation: Apple Translation appears first, then a local
+  TranslateGemma 4B pass replaces it with a more natural classroom translation.
 - Non-blocking translation jobs so English subtitles remain responsive while Chinese is prepared.
 - Automatic post-class summaries using Apple Foundation Models with a deterministic local fallback.
 - Persisted overview, key concepts, timestamped tasks, and a summary/transcript review switcher.
 - Audio-input preflight that reports a missing microphone instead of crashing on headless Macs.
 - iPhone Continuity Camera microphone support through the selected macOS input device.
 - A native SwiftUI macOS workspace with live input level and real subtitle events.
-- Thirty-eight tests across the shared core, audio capture, translation, summary, and macOS UI adapters.
+- Forty-four tests across the shared core, audio capture, translation, summary, and macOS UI adapters.
 
-Energy-saving mode downloads an approximately 120 MB model. High-accuracy mode progressively caches approximately 1.2 GB for its real-time and after-class encoders, then starts from the local Core ML cache. A one-hour 16 kHz mono session uses about 230 MB of temporary memory for the after-class pass. Audio, recognition, and translation remain on the Mac. Apple may ask the user to download the English and Simplified Chinese language package the first time translation is prepared.
+Energy-saving mode downloads an approximately 120 MB model. High-accuracy mode progressively caches approximately 1.2 GB for its real-time and after-class encoders. Course warmup also downloads a pinned approximately 2.22 GB MLX TranslateGemma model for the second-stage translation pass. A one-hour 16 kHz mono session uses about 230 MB of temporary memory for the after-class pass. Audio, recognition, and translation remain on the Mac. Apple may ask the user to download the English and Simplified Chinese language package the first time translation is prepared. TranslateGemma is distributed under the [Gemma terms](https://ai.google.dev/gemma/terms) and is downloaded separately rather than bundled in LecCue.
 
 Course warmup also prepares Apple Translation so the first stable English clause can be translated without waiting for language-model setup. On macOS 26 or later, warmup uses the on-device Apple Foundation Model when available to propose likely English terminology. The suggestions remain editable before the class starts. When Apple Intelligence is unavailable, LecCue still warms the ASR model and derives conservative terms from the course and school names.
 
@@ -48,6 +50,17 @@ Build a foreground development app with microphone permission metadata and an ad
 ./scripts/build-macos-app.sh
 open .build/LecCue.app
 ```
+
+MLX requires Xcode's optional Metal toolchain. Install it once before the first app build:
+
+```bash
+DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer \
+  xcodebuild -downloadComponent MetalToolchain
+```
+
+For development, `LECCUE_TRANSLATION_MODEL_PATH` may point at an already downloaded
+MLX model snapshot, and `LECCUE_MODEL_CACHE_PATH` can move future model downloads to
+an external disk.
 
 A complete Xcode installation is required for App Store signing, ScreenCaptureKit, and device testing. The script produces a local development bundle, not a release archive.
 

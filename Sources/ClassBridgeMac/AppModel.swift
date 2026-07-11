@@ -20,6 +20,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var isWarmingUp = false
     @Published private(set) var summary: SessionSummary?
     @Published private(set) var isSummarizing = false
+    @Published private(set) var isEnhancedTranslationReady = false
 
     private let stateMachine = SessionStateMachine()
     private let sessionStore: SessionStore
@@ -28,6 +29,7 @@ final class AppModel: ObservableObject {
     private let coursePreparationService = CoursePreparationService()
     private let summaryEngine = LocalSummaryEngine()
     let translationEngine = AppleTranslationEngine()
+    private let refinementTranslationEngine = TranslateGemmaTranslationEngine()
 
     private var pipeline: SubtitlePipeline?
     private var recognitionEngine: (any SpeechRecognitionEngine)?
@@ -40,6 +42,7 @@ final class AppModel: ObservableObject {
     private var warmupTask: Task<Void, Never>?
     private var coursePreparationTask: Task<CoursePreparationResult, Never>?
     private var translationPreparationTask: Task<Bool, Never>?
+    private var refinementPreparationTask: Task<Bool, Never>?
     private var prewarmedEngine: (any SpeechRecognitionEngine)?
     private var prewarmedSignature: RecognitionWarmupSignature?
 
@@ -99,9 +102,15 @@ final class AppModel: ObservableObject {
             audioSource: audioSource,
             audioRetention: .discard
         )
+        let sessionTranslationEngine: any TranslationEngine = processingMode == .highAccuracy
+            ? StagedTranslationEngine(
+                primary: translationEngine,
+                refinement: refinementTranslationEngine
+            )
+            : translationEngine
         let pipeline = SubtitlePipeline(
             course: course,
-            translationEngine: translationEngine
+            translationEngine: sessionTranslationEngine
         )
         translationEngine.activate()
         let recognitionProfile: LocalRecognitionProfile = processingMode == .highAccuracy
@@ -272,8 +281,19 @@ final class AppModel: ObservableObject {
             let translationTask = Task {
                 await self.translationEngine.prepare()
             }
+            let refinementTask = Task {
+                guard preparedMode == .highAccuracy else { return false }
+                return await self.refinementTranslationEngine.prepare { [weak self] progress in
+                    let percent = Int((progress.fractionCompleted * 100).rounded())
+                    Task { @MainActor [weak self] in
+                        guard self?.isWarmingUp == true else { return }
+                        self?.statusMessage = "正在准备本地精译模型 \(percent)%"
+                    }
+                }
+            }
             self.coursePreparationTask = preparationTask
             self.translationPreparationTask = translationTask
+            self.refinementPreparationTask = refinementTask
             let engine = LocalRecognitionEngineFactory.make(profile: recognitionProfile)
 
             do {
@@ -292,6 +312,10 @@ final class AppModel: ObservableObject {
 
                 let preparation = await preparationTask.value
                 let translationReady = await translationTask.value
+                if preparedMode == .highAccuracy {
+                    self.statusMessage = "正在加载本地精译模型"
+                }
+                let refinementReady = await refinementTask.value
                 try Task.checkCancellation()
                 guard self.courseName.trimmingCharacters(in: .whitespacesAndNewlines)
                     == preparedCourseName,
@@ -306,11 +330,17 @@ final class AppModel: ObservableObject {
                 self.warmupTask = nil
                 self.coursePreparationTask = nil
                 self.translationPreparationTask = nil
+                self.refinementPreparationTask = nil
+                self.isEnhancedTranslationReady = refinementReady
 
                 if !translationReady {
                     self.statusMessage = "转写已预热，翻译语言包尚未就绪"
+                } else if preparedMode == .highAccuracy, !refinementReady {
+                    self.statusMessage = "预热完成，本地精译未就绪，将使用快速翻译"
                 } else if preparedMode == .highAccuracy, !offlineModelReady {
                     self.statusMessage = "实时模型已预热，课后模型将在结束时加载"
+                } else if preparedMode == .highAccuracy {
+                    self.statusMessage = "预热完成，高质量本地精译已就绪"
                 } else if preparation.usedFoundationModel {
                     self.statusMessage = "预热完成，候选术语已生成"
                 } else {
@@ -319,20 +349,24 @@ final class AppModel: ObservableObject {
             } catch is CancellationError {
                 preparationTask.cancel()
                 translationTask.cancel()
+                refinementTask.cancel()
                 try? await engine.finalize()
                 self.isWarmingUp = false
                 self.warmupTask = nil
                 self.coursePreparationTask = nil
                 self.translationPreparationTask = nil
+                self.refinementPreparationTask = nil
                 self.statusMessage = "预热已取消"
             } catch {
                 preparationTask.cancel()
                 translationTask.cancel()
+                refinementTask.cancel()
                 try? await engine.finalize()
                 self.isWarmingUp = false
                 self.warmupTask = nil
                 self.coursePreparationTask = nil
                 self.translationPreparationTask = nil
+                self.refinementPreparationTask = nil
                 self.statusMessage = "预热失败：\(error.localizedDescription)"
             }
         }
@@ -343,6 +377,7 @@ final class AppModel: ObservableObject {
         statusMessage = "正在取消预热"
         coursePreparationTask?.cancel()
         translationPreparationTask?.cancel()
+        refinementPreparationTask?.cancel()
         translationEngine.cancelPreparation()
         warmupTask?.cancel()
     }
@@ -362,6 +397,7 @@ final class AppModel: ObservableObject {
         warmupTask?.cancel()
         coursePreparationTask?.cancel()
         translationPreparationTask?.cancel()
+        refinementPreparationTask?.cancel()
         startupTask?.cancel()
         eventTask?.cancel()
         captureTask?.cancel()
@@ -373,6 +409,7 @@ final class AppModel: ObservableObject {
         warmupTask = nil
         coursePreparationTask = nil
         translationPreparationTask = nil
+        refinementPreparationTask = nil
         pipeline = nil
         recognitionEngine = nil
         audioCapture = nil
