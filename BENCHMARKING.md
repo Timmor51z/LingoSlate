@@ -31,10 +31,14 @@ The reference retains only session metadata and segment-level English, Chinese, 
 
 ```bash
 swift run LecCueBenchmark \
+  --model eou120m \
+  --audio raw \
   Benchmarks/Private/<session-id>/reference.json \
   Benchmarks/Private/<session-id>/audio.mp3 \
   BenchmarkResults/Private/<session-id>/report.json
 ```
+
+Available model values are `eou120m`, `unified640`, `unified1120`, and `nemotron1120`. Audio values are `raw` and `adaptive`. High-accuracy models download their private local Core ML assets on first use.
 
 The report includes:
 

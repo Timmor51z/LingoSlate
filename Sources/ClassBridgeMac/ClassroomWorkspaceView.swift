@@ -34,10 +34,8 @@ struct ClassroomWorkspaceView: View {
             .disabled(model.isActive)
 
             Picker("模式", selection: $model.processingMode) {
-                Text("本地").tag(ProcessingMode.local)
-                Text("高精度")
-                    .tag(ProcessingMode.highAccuracy)
-                    .disabled(true)
+                Text("省电").tag(ProcessingMode.local)
+                Text("高精度").tag(ProcessingMode.highAccuracy)
             }
             .pickerStyle(.segmented)
             .frame(width: 170)

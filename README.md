@@ -12,11 +12,12 @@ This repository currently contains the first local microphone vertical slice:
 - A bilingual subtitle pipeline with provisional and final segment handling.
 - Atomic JSON session persistence.
 - AVAudioEngine microphone permission, capture, and 16 kHz mono conversion.
-- FluidAudio Parakeet EOU 120M streaming English recognition running locally.
+- FluidAudio Parakeet EOU 120M energy-saving recognition with adaptive gain and limiting.
+- FluidAudio Parakeet Unified 0.6B high-accuracy streaming recognition.
 - A native SwiftUI macOS workspace with live input level and real subtitle events.
-- Eight core unit tests.
+- Seventeen core unit tests.
 
-The first recognition session downloads an approximately 120 MB model. Audio and recognition remain on the Mac. Chinese translation is still a placeholder and is the next production adapter.
+Energy-saving mode downloads an approximately 120 MB model. High-accuracy mode downloads approximately 595 MB on first use and then starts from the local Core ML cache. Audio and recognition remain on the Mac. Chinese translation is still a placeholder and is the next production adapter.
 
 ## Build
 

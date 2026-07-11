@@ -2,6 +2,60 @@ import XCTest
 @testable import ClassBridgeCore
 
 final class ClassBridgeCoreTests: XCTestCase {
+    func testAdaptiveGainRaisesQuietSpeechWithoutClipping() {
+        var processor = AdaptiveGainProcessor()
+        let frame = AudioFrame(
+            samples: [Float](repeating: 0.01, count: 3_200),
+            sampleRate: 16_000,
+            capturedAt: 42
+        )
+
+        var processed = frame
+        for _ in 0..<10 {
+            processed = processor.process(frame)
+        }
+
+        XCTAssertGreaterThan(processor.currentGainDecibels, 10)
+        XCTAssertLessThanOrEqual(processed.samples.map(abs).max() ?? 1, 0.89)
+        XCTAssertEqual(processed.capturedAt, 42)
+        XCTAssertEqual(processed.sampleRate, 16_000)
+    }
+
+    func testAdaptiveGainDoesNotChaseSilence() {
+        var processor = AdaptiveGainProcessor()
+        let silence = AudioFrame(
+            samples: [Float](repeating: 0, count: 3_200),
+            sampleRate: 16_000,
+            capturedAt: 0
+        )
+
+        _ = processor.process(silence)
+
+        XCTAssertEqual(processor.currentGain, 1, accuracy: 0.0001)
+    }
+
+    func testAdaptiveGainLimiterProtectsSuddenPeaks() {
+        var processor = AdaptiveGainProcessor()
+        let quiet = AudioFrame(
+            samples: [Float](repeating: 0.01, count: 3_200),
+            sampleRate: 16_000,
+            capturedAt: 0
+        )
+        for _ in 0..<10 {
+            _ = processor.process(quiet)
+        }
+
+        let loud = AudioFrame(
+            samples: [0.8, -0.8, 0.7, -0.7],
+            sampleRate: 16_000,
+            capturedAt: 1
+        )
+        let processed = processor.process(loud)
+
+        XCTAssertLessThanOrEqual(processed.samples.map(abs).max() ?? 1, 0.89)
+        XCTAssertLessThanOrEqual(processor.currentGain, 0.89 / 0.8 + 0.0001)
+    }
+
     func testTranscriptComparisonNormalizesCaseAndPunctuation() {
         XCTAssertEqual(
             TranscriptComparison.normalizedWords(in: "Hello, STEAM! It's 2026."),

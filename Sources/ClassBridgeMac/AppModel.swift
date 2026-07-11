@@ -7,7 +7,7 @@ import Foundation
 final class AppModel: ObservableObject {
     @Published var courseName = "Mobile Computing and Software Architecture"
     @Published var sessionKind: SessionKind = .lecture
-    @Published var processingMode: ProcessingMode = .local
+    @Published var processingMode: ProcessingMode = .highAccuracy
     @Published var audioSource: AudioSource = .microphone
     @Published private(set) var lifecycleState: SessionLifecycleState = .idle
     @Published private(set) var snapshot = TranscriptSnapshot()
@@ -43,7 +43,6 @@ final class AppModel: ObservableObject {
     var canStart: Bool {
         Course(name: courseName).isReadyToStart
             && lifecycleState == .idle
-            && processingMode == .local
             && audioSource == .microphone
     }
 
@@ -75,7 +74,10 @@ final class AppModel: ObservableObject {
             course: course,
             translationEngine: DemoTranslationEngine()
         )
-        let engine = FluidAudioRecognitionEngine()
+        let recognitionProfile: LocalRecognitionProfile = processingMode == .highAccuracy
+            ? .highAccuracy
+            : .energySaver
+        let engine = LocalRecognitionEngineFactory.make(profile: recognitionProfile)
         let capture = MicrophoneAudioCapture()
 
         self.pipeline = pipeline
@@ -151,7 +153,9 @@ final class AppModel: ObservableObject {
                 guard await capture.requestPermission() else {
                     throw MicrophoneCaptureError.permissionDenied
                 }
-                self.statusMessage = "正在加载本地语音模型（首次约 120 MB）"
+                self.statusMessage = self.processingMode == .highAccuracy
+                    ? "正在加载高精度模型（首次约 595 MB）"
+                    : "正在加载省电模型（首次约 120 MB）"
                 try await engine.start(configuration: RecognitionConfiguration(course: course))
                 try Task.checkCancellation()
                 try await capture.start()

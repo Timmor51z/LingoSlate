@@ -47,6 +47,7 @@ private struct BenchmarkReport: Codable {
     var referenceKind: String
     var referenceSession: ReferenceSession
     var model: String
+    var audioEnhancement: String
     var audioDurationSeconds: Double
     var audioDecodeSeconds: Double
     var modelLoadSeconds: Double
@@ -73,10 +74,96 @@ private enum BenchmarkError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidArguments:
-            return "Usage: swift run LecCueBenchmark <reference.json> <audio-file> <report.json>"
+            return "Usage: swift run LecCueBenchmark [--model eou120m|unified640|unified1120|nemotron1120] [--audio raw|adaptive] <reference.json> <audio-file> <report.json>"
         case let .recognitionFailed(message):
             return "Recognition failed: \(message)"
         }
+    }
+}
+
+private enum BenchmarkModel: String {
+    case eou120m
+    case unified640
+    case unified1120
+    case nemotron1120
+
+    var displayName: String {
+        switch self {
+        case .eou120m:
+            return "FluidAudio Parakeet EOU 120M, 320 ms"
+        case .unified640:
+            return FluidAudioStreamingProfile.unified640ms.displayName
+        case .unified1120:
+            return FluidAudioStreamingProfile.unified1120ms.displayName
+        case .nemotron1120:
+            return FluidAudioStreamingProfile.nemotron1120ms.displayName
+        }
+    }
+
+    func makeEngine() -> any SpeechRecognitionEngine {
+        switch self {
+        case .eou120m:
+            return FluidAudioRecognitionEngine()
+        case .unified640:
+            return FluidAudioStreamingRecognitionEngine(profile: .unified640ms)
+        case .unified1120:
+            return FluidAudioStreamingRecognitionEngine(profile: .unified1120ms)
+        case .nemotron1120:
+            return FluidAudioStreamingRecognitionEngine(profile: .nemotron1120ms)
+        }
+    }
+}
+
+private enum BenchmarkAudio: String {
+    case raw
+    case adaptive
+}
+
+private struct BenchmarkOptions {
+    var model: BenchmarkModel = .eou120m
+    var audio: BenchmarkAudio = .raw
+    var referenceURL: URL
+    var audioURL: URL
+    var reportURL: URL
+
+    static func parse(_ arguments: [String]) throws -> BenchmarkOptions {
+        var model = BenchmarkModel.eou120m
+        var audio = BenchmarkAudio.raw
+        var paths: [String] = []
+        var index = 0
+
+        while index < arguments.count {
+            switch arguments[index] {
+            case "--model":
+                index += 1
+                guard index < arguments.count,
+                      let value = BenchmarkModel(rawValue: arguments[index]) else {
+                    throw BenchmarkError.invalidArguments
+                }
+                model = value
+            case "--audio":
+                index += 1
+                guard index < arguments.count,
+                      let value = BenchmarkAudio(rawValue: arguments[index]) else {
+                    throw BenchmarkError.invalidArguments
+                }
+                audio = value
+            default:
+                paths.append(arguments[index])
+            }
+            index += 1
+        }
+
+        guard paths.count == 3 else {
+            throw BenchmarkError.invalidArguments
+        }
+        return BenchmarkOptions(
+            model: model,
+            audio: audio,
+            referenceURL: URL(fileURLWithPath: paths[0]),
+            audioURL: URL(fileURLWithPath: paths[1]),
+            reportURL: URL(fileURLWithPath: paths[2])
+        )
     }
 }
 
@@ -112,26 +199,23 @@ private actor RecognitionCollector {
 @main
 private struct LecCueBenchmark {
     static func main() async throws {
-        guard CommandLine.arguments.count == 4 else {
-            throw BenchmarkError.invalidArguments
-        }
-
-        let referenceURL = URL(fileURLWithPath: CommandLine.arguments[1])
-        let audioURL = URL(fileURLWithPath: CommandLine.arguments[2])
-        let reportURL = URL(fileURLWithPath: CommandLine.arguments[3])
+        let options = try BenchmarkOptions.parse(Array(CommandLine.arguments.dropFirst()))
         let decoder = JSONDecoder()
         let reference = try decoder.decode(
             LecSyncReference.self,
-            from: Data(contentsOf: referenceURL)
+            from: Data(contentsOf: options.referenceURL)
         )
 
         let decodeStartedAt = Date()
-        let samples = try AudioConverter().resampleAudioFile(audioURL)
+        let samples = try AudioConverter().resampleAudioFile(options.audioURL)
         let audioDecodeSeconds = Date().timeIntervalSince(decodeStartedAt)
         let sampleRate = 16_000.0
         let audioDurationSeconds = Double(samples.count) / sampleRate
 
-        let engine = FluidAudioRecognitionEngine()
+        let baseEngine = options.model.makeEngine()
+        let engine: any SpeechRecognitionEngine = options.audio == .adaptive
+            ? AudioEnhancingRecognitionEngine(base: baseEngine)
+            : baseEngine
         let collector = RecognitionCollector()
         let eventTask = Task {
             for await event in engine.events {
@@ -204,11 +288,12 @@ private struct LecCueBenchmark {
         )
 
         let report = BenchmarkReport(
-            schemaVersion: 2,
+            schemaVersion: 3,
             generatedAt: Date(),
             referenceKind: "LecSync competitor output; not manually corrected ground truth",
             referenceSession: reference.session,
-            model: "FluidAudio Parakeet EOU 120M, 320 ms",
+            model: options.model.displayName,
+            audioEnhancement: options.audio.rawValue,
             audioDurationSeconds: audioDurationSeconds,
             audioDecodeSeconds: audioDecodeSeconds,
             modelLoadSeconds: modelLoadSeconds,
@@ -235,20 +320,22 @@ private struct LecCueBenchmark {
         )
 
         try FileManager.default.createDirectory(
-            at: reportURL.deletingLastPathComponent(),
+            at: options.reportURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        try encoder.encode(report).write(to: reportURL, options: .atomic)
+        try encoder.encode(report).write(to: options.reportURL, options: .atomic)
 
         print(String(
             format: "LecSync agreement word error rate: %.2f%%",
             aggregateErrors.errorRate * 100
         ))
         print(String(format: "Local inference speed: %.2fx realtime", report.realTimeSpeedup))
-        print("Report: \(reportURL.path)")
+        print("Model: \(options.model.displayName)")
+        print("Audio enhancement: \(options.audio.rawValue)")
+        print("Report: \(options.reportURL.path)")
     }
 
     private static func makeWindowReports(

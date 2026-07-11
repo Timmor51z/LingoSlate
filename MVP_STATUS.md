@@ -24,6 +24,10 @@
 - Private LecSync benchmark importer with signed URLs and account metadata removed.
 - Same-audio local benchmark runner with five-minute alignment windows, word coverage, critical-token recall, and runtime measurements.
 - Revision-tolerant streaming transcript cursor that prevents cumulative model output from being emitted twice.
+- Adaptive classroom gain with silence protection and peak limiting for the 120M energy-saving tier.
+- Parakeet Unified 0.6B streaming high-accuracy tier with retained long-session context.
+- User-selectable energy-saving and high-accuracy modes in the macOS workspace.
+- Benchmark model/audio selectors for repeatable local A/B comparisons.
 
 ## Verification status
 
@@ -31,7 +35,7 @@
 - All Swift source files pass `swiftc -parse`.
 - Full package build and tests run with the external Xcode selected through `DEVELOPER_DIR`.
 - `swift test` builds the shared core, Mac executable, and test bundle successfully.
-- All 14 core tests pass, covering comparison metrics, revised streaming transcripts, audio levels, course readiness, approved terminology, lifecycle transitions, subtitle translation, and JSON persistence.
+- All 17 core tests pass, covering adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio levels, course readiness, approved terminology, lifecycle transitions, subtitle translation, and JSON persistence.
 
 Set the external Xcode as the active developer directory once:
 
@@ -46,18 +50,19 @@ swift test
 ## Current runtime path
 
 1. Request microphone permission.
-2. Download the approximately 120 MB Parakeet EOU model on first use.
-3. Capture and convert microphone audio locally.
-4. Emit provisional and final English segments from FluidAudio.
-5. Pass final segments into the bilingual subtitle pipeline.
-6. Persist the completed session locally.
+2. Select the 120M energy-saving tier or Unified 0.6B high-accuracy tier.
+3. Download the selected local model on first use (approximately 120 MB or 595 MB).
+4. Capture and convert microphone audio locally; apply adaptive gain only to the energy-saving tier.
+5. Emit provisional and final English segments from FluidAudio.
+6. Pass final segments into the bilingual subtitle pipeline.
+7. Persist the completed session locally.
 
 ## Next production slice
 
-1. Evaluate a higher-accuracy local recognizer against the saved private benchmark.
+1. Replace the placeholder translator with Apple `TranslationSession`.
 2. Add inverse text normalization for dates, times, and numbers.
-3. Replace the placeholder translator with Apple `TranslationSession`.
-4. Add model download progress, cancellation, and preflight readiness.
-5. Run live subtitle, battery, thermal, and 90-minute soak tests.
+3. Add model download progress, cancellation, and preflight readiness.
+4. Run live subtitle, battery, thermal, and 90-minute soak tests.
+5. Add a high-accuracy overlapping-window post-class transcription pass.
 
 Soniox, automatic course preparation, and summary generation follow after the local bilingual path is stable.
