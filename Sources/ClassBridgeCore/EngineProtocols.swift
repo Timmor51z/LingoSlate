@@ -1,0 +1,99 @@
+import Foundation
+
+public struct AudioFrame: Sendable {
+    public var samples: [Float]
+    public var sampleRate: Double
+    public var capturedAt: TimeInterval
+
+    public init(samples: [Float], sampleRate: Double, capturedAt: TimeInterval) {
+        self.samples = samples
+        self.sampleRate = sampleRate
+        self.capturedAt = capturedAt
+    }
+}
+public struct RecognitionConfiguration: Sendable {
+    public var course: Course
+    public var language: String
+    public var approvedTerms: [GlossaryTerm]
+
+    public init(
+        course: Course,
+        language: String = "en",
+        approvedTerms: [GlossaryTerm] = []
+    ) {
+        self.course = course
+        self.language = language
+        self.approvedTerms = approvedTerms.filter(\.isApproved)
+    }
+}
+
+public enum RecognitionEvent: Sendable {
+    case started
+    case provisional(
+        id: UUID,
+        text: String,
+        startTime: TimeInterval,
+        endTime: TimeInterval,
+        provider: String
+    )
+    case final(
+        id: UUID,
+        text: String,
+        startTime: TimeInterval,
+        endTime: TimeInterval,
+        speaker: String?,
+        provider: String
+    )
+    case failed(message: String)
+    case finished
+}
+
+public protocol SpeechRecognitionEngine: Sendable {
+    var events: AsyncStream<RecognitionEvent> { get }
+
+    func start(configuration: RecognitionConfiguration) async throws
+    func accept(_ frame: AudioFrame) async throws
+    func finalize() async throws
+}
+
+public struct TranslationContext: Sendable {
+    public var course: Course
+    public var recentSourceText: [String]
+    public var approvedTerms: [GlossaryTerm]
+
+    public init(
+        course: Course,
+        recentSourceText: [String],
+        approvedTerms: [GlossaryTerm] = []
+    ) {
+        self.course = course
+        self.recentSourceText = recentSourceText
+        self.approvedTerms = approvedTerms.filter(\.isApproved)
+    }
+}
+
+public protocol TranslationEngine: Sendable {
+    var identifier: String { get }
+
+    func translate(_ text: String, context: TranslationContext) async throws -> String
+}
+
+public struct SessionSummary: Codable, Hashable, Sendable {
+    public var overview: [String]
+    public var keyConcepts: [String]
+    public var actionItems: [String]
+
+    public init(
+        overview: [String],
+        keyConcepts: [String],
+        actionItems: [String]
+    ) {
+        self.overview = overview
+        self.keyConcepts = keyConcepts
+        self.actionItems = actionItems
+    }
+}
+
+public protocol SummaryEngine: Sendable {
+    func summarize(_ document: SessionDocument) async throws -> SessionSummary
+}
