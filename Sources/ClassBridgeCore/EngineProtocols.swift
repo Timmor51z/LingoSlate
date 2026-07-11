@@ -10,7 +10,34 @@ public struct AudioFrame: Sendable {
         self.sampleRate = sampleRate
         self.capturedAt = capturedAt
     }
+
+    public var normalizedLevel: Float {
+        guard !samples.isEmpty else { return 0 }
+        let meanSquare = samples.reduce(Float.zero) { partial, sample in
+            partial + sample * sample
+        } / Float(samples.count)
+        let rms = sqrt(max(meanSquare, 0.000_000_1))
+        let decibels = 20 * log10(rms)
+        return min(max((decibels + 60) / 60, 0), 1)
+    }
 }
+
+public enum AudioCaptureEvent: Sendable {
+    case started(sampleRate: Double)
+    case frame(AudioFrame)
+    case inputLevel(Float)
+    case failed(message: String)
+    case stopped
+}
+
+public protocol AudioCaptureEngine: Sendable {
+    var events: AsyncStream<AudioCaptureEvent> { get }
+
+    func requestPermission() async -> Bool
+    func start() async throws
+    func stop() async
+}
+
 public struct RecognitionConfiguration: Sendable {
     public var course: Course
     public var language: String

@@ -1,3 +1,4 @@
+import ClassBridgeAudio
 import ClassBridgeCore
 import Combine
 import Foundation
@@ -13,14 +14,19 @@ final class AppModel: ObservableObject {
     @Published private(set) var markers: [SessionMarker] = []
     @Published private(set) var statusMessage = "就绪"
     @Published private(set) var startedAt: Date?
+    @Published private(set) var inputLevel: Float = 0
+    @Published private(set) var captureSampleRate: Double?
 
     private let stateMachine = SessionStateMachine()
     private let sessionStore: SessionStore
 
     private var pipeline: SubtitlePipeline?
     private var recognitionEngine: (any SpeechRecognitionEngine)?
+    private var audioCapture: (any AudioCaptureEngine)?
     private var currentDocument: SessionDocument?
+    private var startupTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
+    private var captureTask: Task<Void, Never>?
     private var snapshotTask: Task<Void, Never>?
 
     init() {
@@ -35,7 +41,10 @@ final class AppModel: ObservableObject {
     }
 
     var canStart: Bool {
-        Course(name: courseName).isReadyToStart && lifecycleState == .idle
+        Course(name: courseName).isReadyToStart
+            && lifecycleState == .idle
+            && processingMode == .local
+            && audioSource == .microphone
     }
 
     var isActive: Bool {
@@ -45,6 +54,10 @@ final class AppModel: ObservableObject {
         default:
             return false
         }
+    }
+
+    var canAddMarker: Bool {
+        lifecycleState == .running
     }
 
     func startSession() {
@@ -62,15 +75,19 @@ final class AppModel: ObservableObject {
             course: course,
             translationEngine: DemoTranslationEngine()
         )
-        let engine = DemoRecognitionEngine()
+        let engine = FluidAudioRecognitionEngine()
+        let capture = MicrophoneAudioCapture()
 
         self.pipeline = pipeline
         recognitionEngine = engine
+        audioCapture = capture
         currentDocument = SessionDocument(configuration: configuration)
         markers = []
         snapshot = TranscriptSnapshot()
-        startedAt = Date()
-        statusMessage = "正在准备"
+        startedAt = nil
+        inputLevel = 0
+        captureSampleRate = nil
+        statusMessage = "正在检查麦克风权限"
 
         snapshotTask = Task { [weak self] in
             let stream = await pipeline.snapshots()
@@ -87,7 +104,7 @@ final class AppModel: ObservableObject {
 
                 switch event {
                 case .started:
-                    await self?.markRunning()
+                    self?.statusMessage = "模型已就绪，正在连接麦克风"
                 case let .failed(message):
                     await self?.markFailed(message)
                 case .finished:
@@ -98,23 +115,67 @@ final class AppModel: ObservableObject {
             }
         }
 
-        Task {
+        captureTask = Task { [weak self] in
+            for await event in capture.events {
+                guard !Task.isCancelled else { return }
+
+                switch event {
+                case let .started(sampleRate):
+                    self?.captureSampleRate = sampleRate
+                    await self?.markRunning()
+                    self?.statusMessage = "正在收听"
+                case let .inputLevel(level):
+                    self?.inputLevel = level
+                case let .frame(frame):
+                    do {
+                        try await engine.accept(frame)
+                    } catch {
+                        await self?.markFailed(error.localizedDescription)
+                        return
+                    }
+                case let .failed(message):
+                    await self?.markFailed(message)
+                    return
+                case .stopped:
+                    self?.inputLevel = 0
+                }
+            }
+        }
+
+        startupTask = Task { [weak self] in
+            guard let self else { return }
             do {
-                try await stateMachine.transition(to: .preparing)
-                lifecycleState = await stateMachine.currentState()
+                try await self.stateMachine.transition(to: .preparing)
+                self.lifecycleState = await self.stateMachine.currentState()
+
+                guard await capture.requestPermission() else {
+                    throw MicrophoneCaptureError.permissionDenied
+                }
+                self.statusMessage = "正在加载本地语音模型（首次约 120 MB）"
                 try await engine.start(configuration: RecognitionConfiguration(course: course))
+                try Task.checkCancellation()
+                try await capture.start()
+            } catch is CancellationError {
+                await self.cancelPreparation()
             } catch {
-                await markFailed(error.localizedDescription)
+                await self.markFailed(error.localizedDescription)
             }
         }
     }
 
     func stopSession() {
         guard isActive, let recognitionEngine else { return }
-        statusMessage = "正在整理字幕"
 
+        if lifecycleState == .preparing {
+            statusMessage = "正在取消"
+            startupTask?.cancel()
+            return
+        }
+
+        statusMessage = "正在整理字幕"
         Task {
             do {
+                await audioCapture?.stop()
                 let current = await stateMachine.currentState()
                 if current == .running || current == .paused {
                     try await stateMachine.transition(to: .finalizing)
@@ -128,7 +189,7 @@ final class AppModel: ObservableObject {
     }
 
     func addMarker(_ kind: MarkerKind) {
-        guard let startedAt, isActive else { return }
+        guard let startedAt, canAddMarker else { return }
         let marker = SessionMarker(
             timestamp: max(0, Date().timeIntervalSince(startedAt)),
             kind: kind
@@ -139,16 +200,23 @@ final class AppModel: ObservableObject {
 
     func resetForNextSession() {
         guard !isActive else { return }
+        startupTask?.cancel()
         eventTask?.cancel()
+        captureTask?.cancel()
         snapshotTask?.cancel()
+        startupTask = nil
         eventTask = nil
+        captureTask = nil
         snapshotTask = nil
         pipeline = nil
         recognitionEngine = nil
+        audioCapture = nil
         currentDocument = nil
         snapshot = TranscriptSnapshot()
         markers = []
         startedAt = nil
+        inputLevel = 0
+        captureSampleRate = nil
         statusMessage = "就绪"
 
         Task {
@@ -166,23 +234,28 @@ final class AppModel: ObservableObject {
                 try await stateMachine.transition(to: .running)
             }
             lifecycleState = await stateMachine.currentState()
-            statusMessage = "字幕链路预览中"
+            let captureStartedAt = Date()
+            startedAt = captureStartedAt
+            currentDocument?.startedAt = captureStartedAt
         } catch {
             await markFailed(error.localizedDescription)
         }
     }
 
     private func markFailed(_ message: String) async {
+        await audioCapture?.stop()
         let current = await stateMachine.currentState()
         if current != .idle {
             try? await stateMachine.transition(to: .failed(message: message))
         }
         lifecycleState = await stateMachine.currentState()
+        inputLevel = 0
         statusMessage = message
     }
 
     private func completeSession() async {
         let current = await stateMachine.currentState()
+        if isFailure(current) { return }
 
         do {
             if current == .running || current == .paused {
@@ -206,6 +279,17 @@ final class AppModel: ObservableObject {
         } catch {
             await markFailed(error.localizedDescription)
         }
+    }
+
+    private func cancelPreparation() async {
+        await audioCapture?.stop()
+        let current = await stateMachine.currentState()
+        if current == .preparing {
+            try? await stateMachine.transition(to: .idle)
+        }
+        lifecycleState = await stateMachine.currentState()
+        inputLevel = 0
+        statusMessage = "已取消"
     }
 
     private func isFailure(_ state: SessionLifecycleState) -> Bool {

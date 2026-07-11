@@ -1,6 +1,6 @@
 # MVP implementation status
 
-## Completed in the first slice
+## Completed
 
 - Shared Swift package structure for macOS and future iOS clients.
 - Course, glossary, session, marker, and bilingual transcript models.
@@ -11,6 +11,16 @@
 - Native macOS SwiftUI classroom workspace.
 - Deterministic recognition and translation adapters for end-to-end UI development.
 - Unit tests covering zero-preparation courses, approved terminology, lifecycle transitions, subtitle translation, and persistence.
+- FluidAudio 0.15.5 integrated and version-locked through Swift Package Manager.
+- AVAudioEngine microphone permission and capture lifecycle.
+- Real-time conversion to 16 kHz mono Float32 audio frames.
+- Live input-level monitoring in the classroom status bar.
+- Fully local Parakeet EOU 120M streaming recognition through FluidAudio.
+- Cumulative streaming transcript de-duplication across end-of-utterance boundaries.
+- Unsupported system-audio and cloud controls disabled until their adapters exist.
+- Foreground `LecCue.app` development bundle with microphone usage metadata and ad-hoc signing.
+- Audio-file smoke tool for repeatable local ASR verification.
+- Finalization silence padding so the last spoken word is not truncated.
 
 ## Verification status
 
@@ -18,7 +28,7 @@
 - All Swift source files pass `swiftc -parse`.
 - Full package build and tests run with the external Xcode selected through `DEVELOPER_DIR`.
 - `swift test` builds the shared core, Mac executable, and test bundle successfully.
-- All 5 core tests pass, covering course readiness, approved terminology, lifecycle transitions, subtitle translation, and JSON persistence.
+- All 8 core tests pass, covering audio levels, streaming transcript de-duplication, course readiness, approved terminology, lifecycle transitions, subtitle translation, and JSON persistence.
 
 Set the external Xcode as the active developer directory once:
 
@@ -30,13 +40,21 @@ xcodebuild -version
 swift test
 ```
 
+## Current runtime path
+
+1. Request microphone permission.
+2. Download the approximately 120 MB Parakeet EOU model on first use.
+3. Capture and convert microphone audio locally.
+4. Emit provisional and final English segments from FluidAudio.
+5. Pass final segments into the bilingual subtitle pipeline.
+6. Persist the completed session locally.
+
 ## Next production slice
 
-1. Add FluidAudio through Swift Package Manager.
-2. Implement AVAudioEngine microphone capture and 16 kHz mono conversion.
-3. Connect streaming audio frames to a local recognition adapter.
-4. Replace the demo translator with Apple TranslationSession.
-5. Add microphone permission descriptions and signed app bundling.
-6. Run live subtitle, battery, thermal, and 90-minute soak tests.
+1. Replace the placeholder translator with Apple `TranslationSession`.
+2. Add model download progress, cancellation, and preflight readiness.
+3. Create the release Xcode target and App Store signing configuration.
+4. Run live subtitle, battery, thermal, and 90-minute soak tests.
+5. Add ScreenCaptureKit system audio after the microphone path passes the soak test.
 
-Soniox, system audio capture, automatic course preparation, and summary generation follow after the local microphone path is stable.
+Soniox, automatic course preparation, and summary generation follow after the local bilingual path is stable.

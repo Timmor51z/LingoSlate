@@ -2,6 +2,34 @@ import XCTest
 @testable import ClassBridgeCore
 
 final class ClassBridgeCoreTests: XCTestCase {
+    func testAudioFrameNormalizesInputLevel() {
+        let silence = AudioFrame(samples: [0, 0, 0], sampleRate: 16_000, capturedAt: 0)
+        let loud = AudioFrame(samples: [1, -1, 1, -1], sampleRate: 16_000, capturedAt: 0)
+
+        XCTAssertEqual(silence.normalizedLevel, 0, accuracy: 0.001)
+        XCTAssertEqual(loud.normalizedLevel, 1, accuracy: 0.001)
+    }
+
+    func testIncrementalTranscriptCursorReturnsOnlyNewWords() {
+        var cursor = IncrementalTranscriptCursor()
+
+        XCTAssertEqual(cursor.uncommittedText(in: "The event loop"), "The event loop")
+        cursor.commit("The event loop")
+        XCTAssertEqual(
+            cursor.uncommittedText(in: "The event loop, schedules callbacks."),
+            "schedules callbacks."
+        )
+    }
+
+    func testIncrementalTranscriptCursorFallsBackAfterRevision() {
+        let cursor = IncrementalTranscriptCursor(committedTranscript: "The event loop")
+
+        XCTAssertEqual(
+            cursor.uncommittedText(in: "A callback enters the queue"),
+            "A callback enters the queue"
+        )
+    }
+
     func testCourseNeedsOnlyAName() {
         XCTAssertFalse(Course(name: "   ").isReadyToStart)
         XCTAssertTrue(Course(name: "Mobile Computing").isReadyToStart)

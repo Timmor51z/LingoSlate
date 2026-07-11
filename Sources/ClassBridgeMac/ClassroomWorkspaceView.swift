@@ -35,7 +35,9 @@ struct ClassroomWorkspaceView: View {
 
             Picker("模式", selection: $model.processingMode) {
                 Text("本地").tag(ProcessingMode.local)
-                Text("高精度").tag(ProcessingMode.highAccuracy)
+                Text("高精度")
+                    .tag(ProcessingMode.highAccuracy)
+                    .disabled(true)
             }
             .pickerStyle(.segmented)
             .frame(width: 170)
@@ -74,6 +76,19 @@ struct ClassroomWorkspaceView: View {
 
             Label(audioSourceLabel, systemImage: "mic.fill")
                 .foregroundStyle(.secondary)
+
+            if model.isActive, model.audioSource == .microphone {
+                ProgressView(value: Double(model.inputLevel))
+                    .progressViewStyle(.linear)
+                    .frame(width: 72)
+                    .accessibilityLabel("麦克风输入电平")
+
+                if let sampleRate = model.captureSampleRate {
+                    Text("\(Int(sampleRate / 1_000)) kHz")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
 
             if let startedAt = model.startedAt {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -164,14 +179,18 @@ struct ClassroomWorkspaceView: View {
                     action: { model.addMarker(.actionItem) }
                 )
             }
-            .disabled(!model.isActive)
+            .disabled(!model.canAddMarker)
 
             Spacer()
 
             Picker("音频", selection: $model.audioSource) {
                 Label("麦克风", systemImage: "mic").tag(AudioSource.microphone)
-                Label("系统音频", systemImage: "speaker.wave.2").tag(AudioSource.systemAudio)
-                Label("混合", systemImage: "waveform").tag(AudioSource.mixed)
+                Label("系统音频", systemImage: "speaker.wave.2")
+                    .tag(AudioSource.systemAudio)
+                    .disabled(true)
+                Label("混合", systemImage: "waveform")
+                    .tag(AudioSource.mixed)
+                    .disabled(true)
             }
             .labelsHidden()
             .frame(width: 150)

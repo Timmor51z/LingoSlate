@@ -1,37 +1,54 @@
-# ClassBridge
+# LecCue
 
-ClassBridge is a local-first bilingual classroom companion for international students. The first product is a native macOS app; the shared Swift core is designed for a planned iPhone companion.
+LecCue is a local-first bilingual classroom companion for international students. The first product is a native macOS app; the shared Swift core is designed for a planned iPhone companion. `ClassBridge` remains the temporary internal Swift module name while the product branding is migrated.
 
 ## Current slice
 
-This repository currently contains the first executable architecture slice:
+This repository currently contains the first local microphone vertical slice:
 
 - Cross-platform course, session, glossary, marker, and transcript models.
 - Replaceable speech recognition, translation, and summary protocols.
 - Session lifecycle validation.
 - A bilingual subtitle pipeline with provisional and final segment handling.
 - Atomic JSON session persistence.
-- A native SwiftUI macOS workspace backed by a deterministic demo engine.
-- Core unit tests.
+- AVAudioEngine microphone permission, capture, and 16 kHz mono conversion.
+- FluidAudio Parakeet EOU 120M streaming English recognition running locally.
+- A native SwiftUI macOS workspace with live input level and real subtitle events.
+- Eight core unit tests.
 
-The demo engine validates UI and event flow without pretending to be the production recognizer. The next adapter will connect microphone audio to FluidAudio after a full Xcode installation is available.
+The first recognition session downloads an approximately 120 MB model. Audio and recognition remain on the Mac. Chinese translation is still a placeholder and is the next production adapter.
 
 ## Build
 
 ```bash
-swift build
-swift test
-swift run ClassBridgeMac
+DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift build
+DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift test
+DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift run ClassBridgeMac
 ```
 
-The command-line Swift toolchain can build the package. A complete Xcode installation is still required for microphone permission descriptions, signing, app bundling, ScreenCaptureKit, and device testing.
+Build a foreground development app with microphone permission metadata and an ad-hoc signature:
+
+```bash
+./scripts/build-macos-app.sh
+open .build/LecCue.app
+```
+
+A complete Xcode installation is required for App Store signing, ScreenCaptureKit, and device testing. The script produces a local development bundle, not a release archive.
+
+Run the local recognition adapter against a known audio file:
+
+```bash
+swift run LecCueASRSmoke /path/to/english-audio.wav
+```
 
 ## Structure
 
 ```text
 Sources/
   ClassBridgeCore/       Shared macOS/iOS domain and pipeline
+  ClassBridgeAudio/      Shared local capture and FluidAudio adapters
   ClassBridgeMac/        Native macOS application
+  LecCueASRSmoke/        Local audio-file recognition smoke tool
 Tests/
   ClassBridgeCoreTests/  Shared core tests
 ```
