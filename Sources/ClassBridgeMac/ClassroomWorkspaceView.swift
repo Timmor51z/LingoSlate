@@ -5,6 +5,7 @@ import Translation
 struct ClassroomWorkspaceView: View {
     @Environment(\.openSettings) private var openSettings
     @StateObject private var model: AppModel
+    @State private var completedSurface: CompletedSurface = .summary
 
     init(profileStore: UserProfileStore) {
         _model = StateObject(
@@ -28,6 +29,11 @@ struct ClassroomWorkspaceView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .background {
             AppleTranslationSessionHost(engine: model.translationEngine)
+        }
+        .onChange(of: model.lifecycleState) { _, state in
+            if state == .completed {
+                completedSurface = .summary
+            }
         }
     }
 
@@ -160,7 +166,34 @@ struct ClassroomWorkspaceView: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
+    @ViewBuilder
     private var transcriptSurface: some View {
+        if model.lifecycleState == .completed {
+            VStack(spacing: 0) {
+                Picker("课后内容", selection: $completedSurface) {
+                    Text("摘要").tag(CompletedSurface.summary)
+                    Text("全文").tag(CompletedSurface.transcript)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 220)
+                .padding(.vertical, 10)
+
+                Divider()
+
+                switch completedSurface {
+                case .summary:
+                    SessionSummaryView(summary: model.summary)
+                case .transcript:
+                    transcriptScrollView
+                }
+            }
+        } else {
+            transcriptScrollView
+        }
+    }
+
+    private var transcriptScrollView: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -292,6 +325,89 @@ struct ClassroomWorkspaceView: View {
     private func durationText(_ duration: TimeInterval) -> String {
         let seconds = max(0, Int(duration))
         return String(format: "%02d:%02d:%02d", seconds / 3_600, seconds / 60 % 60, seconds % 60)
+    }
+}
+
+private enum CompletedSurface: Hashable {
+    case summary
+    case transcript
+}
+
+struct SessionSummaryView: View {
+    let summary: SessionSummary?
+
+    var body: some View {
+        if let summary, !summary.isEmpty {
+            ScrollView {
+                SummaryContentView(summary: summary)
+            }
+        } else {
+            ContentUnavailableView(
+                "暂无可总结内容",
+                systemImage: "doc.text.magnifyingglass",
+                description: Text("本次课堂没有识别到稳定字幕")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+struct SummaryContentView: View {
+    let summary: SessionSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            SummarySection(
+                title: "课堂概览",
+                systemImage: "text.alignleft",
+                items: summary.overview
+            )
+            SummarySection(
+                title: "核心概念",
+                systemImage: "lightbulb",
+                items: summary.keyConcepts
+            )
+            SummarySection(
+                title: "任务与提醒",
+                systemImage: "checklist",
+                items: summary.actionItems
+            )
+        }
+        .frame(maxWidth: 920, alignment: .leading)
+        .padding(.horizontal, 40)
+        .padding(.vertical, 30)
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+}
+
+private struct SummarySection: View {
+    let title: String
+    let systemImage: String
+    let items: [String]
+
+    var body: some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Label(title, systemImage: systemImage)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 5))
+                                .foregroundStyle(.tertiary)
+                            Text(item)
+                                .font(.body)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(.leading, 4)
+            }
+        }
     }
 }
 

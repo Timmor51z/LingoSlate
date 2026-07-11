@@ -190,6 +190,7 @@ public struct SessionDocument: Codable, Hashable, Identifiable, Sendable {
     public var endedAt: Date?
     public var segments: [TranscriptSegment]
     public var markers: [SessionMarker]
+    public var summary: SessionSummary?
 
     public init(
         id: UUID = UUID(),
@@ -197,7 +198,8 @@ public struct SessionDocument: Codable, Hashable, Identifiable, Sendable {
         startedAt: Date = Date(),
         endedAt: Date? = nil,
         segments: [TranscriptSegment] = [],
-        markers: [SessionMarker] = []
+        markers: [SessionMarker] = [],
+        summary: SessionSummary? = nil
     ) {
         self.id = id
         self.configuration = configuration
@@ -205,6 +207,7 @@ public struct SessionDocument: Codable, Hashable, Identifiable, Sendable {
         self.endedAt = endedAt
         self.segments = segments
         self.markers = markers
+        self.summary = summary
     }
 }
 

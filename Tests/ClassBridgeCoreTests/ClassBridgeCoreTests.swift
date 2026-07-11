@@ -149,6 +149,21 @@ final class ClassBridgeCoreTests: XCTestCase {
         XCTAssertEqual(loud.normalizedLevel, 1, accuracy: 0.001)
     }
 
+    func testMicrophoneCaptureRejectsMissingInputDeviceWithoutStartingAudioEngine() async {
+        let capture = MicrophoneAudioCapture(inputDeviceIsAvailable: { false })
+
+        do {
+            try await capture.start()
+            XCTFail("Expected unavailable microphone error")
+        } catch let error as MicrophoneCaptureError {
+            guard case .unavailable = error else {
+                return XCTFail("Expected unavailable, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testSessionAudioBufferTracksDurationAndReleasesFrames() async {
         let buffer = SessionAudioBuffer()
         await buffer.append(
@@ -502,6 +517,78 @@ final class ClassBridgeCoreTests: XCTestCase {
         XCTAssertTrue(snapshot.finalSegments.allSatisfy { $0.state == .translated })
     }
 
+    func testDeterministicSummaryUsesTranslationsTermsAndActionCues() async throws {
+        let document = SessionDocument(
+            configuration: SessionConfiguration(
+                course: Course(
+                    name: "Concurrency",
+                    recognitionTerms: ["Event Loop"]
+                )
+            ),
+            segments: [
+                TranscriptSegment(
+                    startTime: 0,
+                    endTime: 10,
+                    sourceText: "Today we introduce the event loop.",
+                    translatedText: "今天介绍事件循环。",
+                    state: .translated,
+                    provider: "test"
+                ),
+                TranscriptSegment(
+                    startTime: 30,
+                    endTime: 40,
+                    sourceText: "The event loop schedules callbacks.",
+                    translatedText: "事件循环负责调度回调。",
+                    state: .translated,
+                    provider: "test"
+                ),
+                TranscriptSegment(
+                    startTime: 90,
+                    endTime: 100,
+                    sourceText: "Remember to submit the assignment before the Friday deadline.",
+                    translatedText: "请在周五截止时间前提交作业。",
+                    state: .translated,
+                    provider: "test"
+                ),
+            ],
+            markers: [SessionMarker(timestamp: 92, kind: .actionItem)]
+        )
+
+        let summary = try await DeterministicSummaryEngine().summarize(document)
+
+        XCTAssertEqual(summary.overview.first, "今天介绍事件循环。")
+        XCTAssertTrue(summary.keyConcepts.contains("Event Loop"))
+        XCTAssertEqual(summary.actionItems, ["[01:30] 请在周五截止时间前提交作业。"])
+        XCTAssertFalse(summary.isEmpty)
+    }
+
+    func testDeterministicSummaryLimitsOverviewAndHandlesEmptyTranscript() async throws {
+        let segments = (0..<12).map { index in
+            TranscriptSegment(
+                startTime: Double(index * 10),
+                endTime: Double(index * 10 + 5),
+                sourceText: "Topic number \(index)",
+                state: .final,
+                provider: "test"
+            )
+        }
+        let document = SessionDocument(
+            configuration: SessionConfiguration(course: Course(name: "Topics")),
+            segments: segments
+        )
+        let emptyDocument = SessionDocument(
+            configuration: SessionConfiguration(course: Course(name: "Empty"))
+        )
+
+        let summary = try await DeterministicSummaryEngine().summarize(document)
+        let emptySummary = try await DeterministicSummaryEngine().summarize(emptyDocument)
+
+        XCTAssertEqual(summary.overview.count, 5)
+        XCTAssertEqual(summary.overview.first, "Topic number 0")
+        XCTAssertEqual(summary.overview.last, "Topic number 11")
+        XCTAssertTrue(emptySummary.isEmpty)
+    }
+
     func testSessionStoreRoundTrip() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ClassBridgeTests-\(UUID().uuidString)")
@@ -521,7 +608,12 @@ final class ClassBridgeCoreTests: XCTestCase {
                     state: .translated,
                     provider: "test"
                 )
-            ]
+            ],
+            summary: SessionSummary(
+                overview: ["介绍了数据库事务。"],
+                keyConcepts: ["Atomicity"],
+                actionItems: []
+            )
         )
 
         try await store.save(document)
@@ -532,6 +624,7 @@ final class ClassBridgeCoreTests: XCTestCase {
         XCTAssertEqual(loaded.configuration, document.configuration)
         XCTAssertEqual(loaded.segments, document.segments)
         XCTAssertEqual(loaded.markers, document.markers)
+        XCTAssertEqual(loaded.summary, document.summary)
         XCTAssertEqual(
             loaded.startedAt.timeIntervalSince1970,
             document.startedAt.timeIntervalSince1970,

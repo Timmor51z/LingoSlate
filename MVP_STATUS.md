@@ -32,6 +32,10 @@
 - Course-name warmup for terminology and real-time/post-class ASR models.
 - Apple Translation integration for on-device English-to-Simplified-Chinese subtitles.
 - Non-blocking translation jobs that keep English subtitles live during translation preparation.
+- Local post-class summary generation with Apple Foundation Models and a deterministic fallback.
+- Persisted overview, concepts, timestamped actions, and summary/full-transcript review views.
+- Missing-input-device preflight that prevents AVAudioEngine crashes on Macs without a microphone.
+- iPhone Continuity Camera microphone verified on a Mac mini at the app's 16 kHz capture rate.
 
 ## Verification status
 
@@ -39,7 +43,7 @@
 - All Swift source files pass `swiftc -parse`.
 - Full package build and tests run with the external Xcode selected through `DEVELOPER_DIR`.
 - `swift test` builds the shared core, Mac executable, and test bundle successfully.
-- All 33 tests pass, covering adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio levels, course readiness, approved terminology, lifecycle transitions, non-blocking subtitle translation, Apple translation coordination, and JSON persistence.
+- All 38 tests pass, covering adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio input preflight, course readiness, approved terminology, lifecycle transitions, non-blocking subtitle translation, Apple translation coordination, deterministic summaries, long-session sampling, summary rendering, and JSON persistence.
 
 Set the external Xcode as the active developer directory once:
 
@@ -59,13 +63,14 @@ swift test
 4. Capture and convert microphone audio locally; apply adaptive gain only to the energy-saving tier.
 5. Emit provisional and final English segments from FluidAudio.
 6. Publish final English segments immediately and translate them locally through Apple Translation.
-7. Persist the completed bilingual session locally.
+7. Generate a local structured summary with deterministic fallback behavior.
+8. Persist the completed bilingual session and summary locally.
 
 ## Next production slice
 
 1. Add inverse text normalization for dates, times, and numbers.
 2. Add detailed model download progress and preflight readiness.
 3. Run live subtitle, battery, thermal, and 90-minute soak tests.
-4. Add post-class summary generation and bilingual export.
+4. Add Markdown, text, SRT, and VTT bilingual export.
 
-Soniox, automatic course preparation, and summary generation follow after the local bilingual path is stable.
+Soniox and source-attributed automatic course preparation follow after the local bilingual path is stable.

@@ -18,12 +18,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var inputLevel: Float = 0
     @Published private(set) var captureSampleRate: Double?
     @Published private(set) var isWarmingUp = false
+    @Published private(set) var summary: SessionSummary?
+    @Published private(set) var isSummarizing = false
 
     private let stateMachine = SessionStateMachine()
     private let sessionStore: SessionStore
     private let postClassAudioBuffer = SessionAudioBuffer()
     private let profileStore: UserProfileStore
     private let coursePreparationService = CoursePreparationService()
+    private let summaryEngine = LocalSummaryEngine()
     let translationEngine = AppleTranslationEngine()
 
     private var pipeline: SubtitlePipeline?
@@ -117,6 +120,8 @@ final class AppModel: ObservableObject {
         currentDocument = SessionDocument(configuration: configuration)
         markers = []
         snapshot = TranscriptSnapshot()
+        summary = nil
+        isSummarizing = false
         startedAt = nil
         inputLevel = 0
         captureSampleRate = nil
@@ -373,6 +378,8 @@ final class AppModel: ObservableObject {
         audioCapture = nil
         currentDocument = nil
         snapshot = TranscriptSnapshot()
+        summary = nil
+        isSummarizing = false
         markers = []
         startedAt = nil
         inputLevel = 0
@@ -412,6 +419,7 @@ final class AppModel: ObservableObject {
         }
         lifecycleState = await stateMachine.currentState()
         inputLevel = 0
+        isSummarizing = false
         statusMessage = message
     }
 
@@ -422,9 +430,6 @@ final class AppModel: ObservableObject {
         do {
             if current == .running || current == .paused {
                 try await stateMachine.transition(to: .finalizing)
-            }
-            if await stateMachine.currentState() == .finalizing {
-                try await stateMachine.transition(to: .completed)
             }
             lifecycleState = await stateMachine.currentState()
 
@@ -437,13 +442,23 @@ final class AppModel: ObservableObject {
                 document.endedAt = Date()
                 document.segments = snapshot.finalSegments
                 document.markers = markers
+                statusMessage = "正在生成课后摘要"
+                isSummarizing = true
+                let generatedSummary = try await summaryEngine.summarize(document)
+                document.summary = generatedSummary
+                summary = generatedSummary
+                isSummarizing = false
                 try await sessionStore.save(document)
                 currentDocument = document
-                statusMessage = "已保存"
-            } else {
-                statusMessage = "已完成"
             }
+
+            if await stateMachine.currentState() == .finalizing {
+                try await stateMachine.transition(to: .completed)
+            }
+            lifecycleState = await stateMachine.currentState()
+            statusMessage = summary?.isEmpty == false ? "摘要已生成" : "已保存"
         } catch {
+            isSummarizing = false
             await markFailed(error.localizedDescription)
         }
     }

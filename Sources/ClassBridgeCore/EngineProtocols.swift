@@ -119,6 +119,10 @@ public struct SessionSummary: Codable, Hashable, Sendable {
         self.keyConcepts = keyConcepts
         self.actionItems = actionItems
     }
+
+    public var isEmpty: Bool {
+        overview.isEmpty && keyConcepts.isEmpty && actionItems.isEmpty
+    }
 }
 
 public protocol SummaryEngine: Sendable {

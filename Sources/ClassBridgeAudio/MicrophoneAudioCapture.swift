@@ -33,11 +33,22 @@ public actor MicrophoneAudioCapture: AudioCaptureEngine {
     private var tapState: TapState?
     private var isRunning = false
     private var isFinished = false
+    private let inputDeviceIsAvailable: @Sendable () -> Bool
 
     public init() {
         let pair = AsyncStream<AudioCaptureEvent>.makeStream()
         events = pair.stream
         continuation = pair.continuation
+        inputDeviceIsAvailable = {
+            AVCaptureDevice.default(for: .audio) != nil
+        }
+    }
+
+    init(inputDeviceIsAvailable: @escaping @Sendable () -> Bool) {
+        let pair = AsyncStream<AudioCaptureEvent>.makeStream()
+        events = pair.stream
+        continuation = pair.continuation
+        self.inputDeviceIsAvailable = inputDeviceIsAvailable
     }
 
     public func requestPermission() async -> Bool {
@@ -60,6 +71,9 @@ public actor MicrophoneAudioCapture: AudioCaptureEngine {
     public func start() async throws {
         guard !isRunning else { return }
         guard !isFinished else { throw MicrophoneCaptureError.cancelled }
+        guard inputDeviceIsAvailable() else {
+            throw MicrophoneCaptureError.unavailable
+        }
         guard await requestPermission() else {
             throw MicrophoneCaptureError.permissionDenied
         }
