@@ -1,5 +1,6 @@
 import ClassBridgeCore
 import SwiftUI
+import Translation
 
 struct ClassroomWorkspaceView: View {
     @Environment(\.openSettings) private var openSettings
@@ -25,6 +26,9 @@ struct ClassroomWorkspaceView: View {
         }
         .frame(minWidth: 860, minHeight: 560)
         .background(Color(nsColor: .windowBackgroundColor))
+        .background {
+            AppleTranslationSessionHost(engine: model.translationEngine)
+        }
     }
 
     private var courseContextBar: some View {
@@ -116,6 +120,8 @@ struct ClassroomWorkspaceView: View {
 
             Label(audioSourceLabel, systemImage: "mic.fill")
                 .foregroundStyle(.secondary)
+
+            TranslationStatusLabel(engine: model.translationEngine)
 
             if model.isActive, model.audioSource == .microphone {
                 ProgressView(value: Double(model.inputLevel))
@@ -286,6 +292,45 @@ struct ClassroomWorkspaceView: View {
     private func durationText(_ duration: TimeInterval) -> String {
         let seconds = max(0, Int(duration))
         return String(format: "%02d:%02d:%02d", seconds / 3_600, seconds / 60 % 60, seconds % 60)
+    }
+}
+
+private struct AppleTranslationSessionHost: View {
+    @ObservedObject var engine: AppleTranslationEngine
+
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .accessibilityHidden(true)
+            .translationTask(engine.configuration) { session in
+                await engine.run(systemSession: session)
+            }
+    }
+}
+
+private struct TranslationStatusLabel: View {
+    @ObservedObject var engine: AppleTranslationEngine
+
+    var body: some View {
+        Label(engine.statusLabel, systemImage: engine.statusIcon)
+            .foregroundStyle(statusColor)
+            .help(failureMessage ?? engine.statusLabel)
+    }
+
+    private var statusColor: Color {
+        switch engine.state {
+        case .ready:
+            return .green
+        case .failed:
+            return .orange
+        case .idle, .preparing:
+            return .secondary
+        }
+    }
+
+    private var failureMessage: String? {
+        guard case let .failed(message) = engine.state else { return nil }
+        return message
     }
 }
 

@@ -24,6 +24,7 @@ final class AppModel: ObservableObject {
     private let postClassAudioBuffer = SessionAudioBuffer()
     private let profileStore: UserProfileStore
     private let coursePreparationService = CoursePreparationService()
+    let translationEngine = AppleTranslationEngine()
 
     private var pipeline: SubtitlePipeline?
     private var recognitionEngine: (any SpeechRecognitionEngine)?
@@ -35,6 +36,7 @@ final class AppModel: ObservableObject {
     private var snapshotTask: Task<Void, Never>?
     private var warmupTask: Task<Void, Never>?
     private var coursePreparationTask: Task<CoursePreparationResult, Never>?
+    private var translationPreparationTask: Task<Bool, Never>?
     private var prewarmedEngine: (any SpeechRecognitionEngine)?
     private var prewarmedSignature: RecognitionWarmupSignature?
 
@@ -96,8 +98,9 @@ final class AppModel: ObservableObject {
         )
         let pipeline = SubtitlePipeline(
             course: course,
-            translationEngine: DemoTranslationEngine()
+            translationEngine: translationEngine
         )
+        translationEngine.activate()
         let recognitionProfile: LocalRecognitionProfile = processingMode == .highAccuracy
             ? .highAccuracy
             : .energySaver
@@ -261,7 +264,11 @@ final class AppModel: ObservableObject {
                     profile: profile
                 )
             }
+            let translationTask = Task {
+                await self.translationEngine.prepare()
+            }
             self.coursePreparationTask = preparationTask
+            self.translationPreparationTask = translationTask
             let engine = LocalRecognitionEngineFactory.make(profile: recognitionProfile)
 
             do {
@@ -279,6 +286,7 @@ final class AppModel: ObservableObject {
                 }
 
                 let preparation = await preparationTask.value
+                let translationReady = await translationTask.value
                 try Task.checkCancellation()
                 guard self.courseName.trimmingCharacters(in: .whitespacesAndNewlines)
                     == preparedCourseName,
@@ -292,8 +300,11 @@ final class AppModel: ObservableObject {
                 self.isWarmingUp = false
                 self.warmupTask = nil
                 self.coursePreparationTask = nil
+                self.translationPreparationTask = nil
 
-                if preparedMode == .highAccuracy, !offlineModelReady {
+                if !translationReady {
+                    self.statusMessage = "转写已预热，翻译语言包尚未就绪"
+                } else if preparedMode == .highAccuracy, !offlineModelReady {
                     self.statusMessage = "实时模型已预热，课后模型将在结束时加载"
                 } else if preparation.usedFoundationModel {
                     self.statusMessage = "预热完成，候选术语已生成"
@@ -302,17 +313,21 @@ final class AppModel: ObservableObject {
                 }
             } catch is CancellationError {
                 preparationTask.cancel()
+                translationTask.cancel()
                 try? await engine.finalize()
                 self.isWarmingUp = false
                 self.warmupTask = nil
                 self.coursePreparationTask = nil
+                self.translationPreparationTask = nil
                 self.statusMessage = "预热已取消"
             } catch {
                 preparationTask.cancel()
+                translationTask.cancel()
                 try? await engine.finalize()
                 self.isWarmingUp = false
                 self.warmupTask = nil
                 self.coursePreparationTask = nil
+                self.translationPreparationTask = nil
                 self.statusMessage = "预热失败：\(error.localizedDescription)"
             }
         }
@@ -322,6 +337,8 @@ final class AppModel: ObservableObject {
         guard isWarmingUp else { return }
         statusMessage = "正在取消预热"
         coursePreparationTask?.cancel()
+        translationPreparationTask?.cancel()
+        translationEngine.cancelPreparation()
         warmupTask?.cancel()
     }
 
@@ -339,6 +356,7 @@ final class AppModel: ObservableObject {
         guard !isActive else { return }
         warmupTask?.cancel()
         coursePreparationTask?.cancel()
+        translationPreparationTask?.cancel()
         startupTask?.cancel()
         eventTask?.cancel()
         captureTask?.cancel()
@@ -349,6 +367,7 @@ final class AppModel: ObservableObject {
         snapshotTask = nil
         warmupTask = nil
         coursePreparationTask = nil
+        translationPreparationTask = nil
         pipeline = nil
         recognitionEngine = nil
         audioCapture = nil
@@ -410,6 +429,7 @@ final class AppModel: ObservableObject {
             lifecycleState = await stateMachine.currentState()
 
             if let pipeline {
+                await pipeline.finishPendingTranslations()
                 snapshot = await pipeline.currentSnapshot()
             }
 

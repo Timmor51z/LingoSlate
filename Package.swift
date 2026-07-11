@@ -55,5 +55,9 @@ let package = Package(
             name: "ClassBridgeCoreTests",
             dependencies: ["ClassBridgeCore", "ClassBridgeAudio"]
         ),
+        .testTarget(
+            name: "ClassBridgeMacTests",
+            dependencies: ["ClassBridgeMac", "ClassBridgeCore"]
+        ),
     ]
 )

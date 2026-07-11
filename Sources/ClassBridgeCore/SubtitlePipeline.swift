@@ -10,6 +10,7 @@ public actor SubtitlePipeline {
     private var finalSegments: [TranscriptSegment] = []
     private var provisionalSegment: TranscriptSegment?
     private var continuations: [UUID: AsyncStream<TranscriptSnapshot>.Continuation] = [:]
+    private var translationTasks: [UUID: PendingTranslation] = [:]
 
     public init(
         course: Course,
@@ -83,16 +84,11 @@ public actor SubtitlePipeline {
                 approvedTerms: approvedTerms
             )
 
-            do {
-                let translation = try await translationEngine.translate(
-                    normalizedText,
-                    context: context
-                )
-                applyTranslation(translation, to: id)
-                publish()
-            } catch {
-                // Keep the finalized English segment. Translation can be retried later.
-            }
+            scheduleTranslation(
+                text: normalizedText,
+                segmentID: id,
+                context: context
+            )
 
         case .failed:
             provisionalSegment = nil
@@ -105,9 +101,19 @@ public actor SubtitlePipeline {
     }
 
     public func reset() {
+        cancelPendingTranslations()
         finalSegments.removeAll()
         provisionalSegment = nil
         publish()
+    }
+
+    public func finishPendingTranslations() async {
+        while !translationTasks.isEmpty {
+            let tasks = translationTasks.values.map(\.task)
+            for task in tasks {
+                await task.value
+            }
+        }
     }
 
     @discardableResult
@@ -117,6 +123,7 @@ public actor SubtitlePipeline {
         provider: String,
         maximumWordsPerSegment: Int = 80
     ) async -> Bool {
+        cancelPendingTranslations()
         let text = termNormalizer.normalize(text)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty,
@@ -198,6 +205,52 @@ public actor SubtitlePipeline {
         finalSegments[index].state = .translated
     }
 
+    private func scheduleTranslation(
+        text: String,
+        segmentID: UUID,
+        context: TranslationContext
+    ) {
+        translationTasks[segmentID]?.task.cancel()
+        let token = UUID()
+        let engine = translationEngine
+        let task = Task { [weak self] in
+            let result: Result<String, Error>
+            do {
+                result = .success(try await engine.translate(text, context: context))
+            } catch {
+                result = .failure(error)
+            }
+            await self?.completeTranslation(
+                result,
+                segmentID: segmentID,
+                token: token
+            )
+        }
+        translationTasks[segmentID] = PendingTranslation(token: token, task: task)
+    }
+
+    private func completeTranslation(
+        _ result: Result<String, Error>,
+        segmentID: UUID,
+        token: UUID
+    ) {
+        guard translationTasks[segmentID]?.token == token else { return }
+        translationTasks[segmentID] = nil
+
+        if case let .success(translation) = result,
+           !translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            applyTranslation(translation, to: segmentID)
+            publish()
+        }
+    }
+
+    private func cancelPendingTranslations() {
+        for pending in translationTasks.values {
+            pending.task.cancel()
+        }
+        translationTasks.removeAll()
+    }
+
     private func makeSnapshot() -> TranscriptSnapshot {
         TranscriptSnapshot(
             finalSegments: finalSegments,
@@ -274,4 +327,9 @@ public actor SubtitlePipeline {
     private static func wordCount(_ text: String) -> Int {
         text.split(whereSeparator: \.isWhitespace).count
     }
+}
+
+private struct PendingTranslation {
+    var token: UUID
+    var task: Task<Void, Never>
 }

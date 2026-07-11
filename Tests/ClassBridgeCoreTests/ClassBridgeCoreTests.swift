@@ -396,6 +396,7 @@ final class ClassBridgeCoreTests: XCTestCase {
                 provider: "test"
             )
         )
+        await pipeline.finishPendingTranslations()
 
         snapshot = await pipeline.currentSnapshot()
         XCTAssertNil(snapshot.provisionalSegment)
@@ -423,6 +424,7 @@ final class ClassBridgeCoreTests: XCTestCase {
                 provider: "test"
             )
         )
+        await pipeline.finishPendingTranslations()
         let snapshot = await pipeline.currentSnapshot()
 
         XCTAssertEqual(
@@ -433,6 +435,34 @@ final class ClassBridgeCoreTests: XCTestCase {
             snapshot.finalSegments.first?.translatedText,
             "译文：Open MyWaikato for the timetable."
         )
+    }
+
+    func testPipelinePublishesFinalEnglishBeforeTranslationFinishes() async {
+        let translationEngine = DeferredTranslationEngine()
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Concurrency"),
+            translationEngine: translationEngine
+        )
+
+        await pipeline.consume(
+            .final(
+                id: UUID(),
+                text: "English should remain responsive.",
+                startTime: 0,
+                endTime: 2,
+                speaker: nil,
+                provider: "test"
+            )
+        )
+
+        var snapshot = await pipeline.currentSnapshot()
+        XCTAssertEqual(snapshot.finalSegments.first?.sourceText, "English should remain responsive.")
+        XCTAssertNil(snapshot.finalSegments.first?.translatedText)
+
+        translationEngine.complete(with: "英文字幕不应被翻译阻塞。")
+        await pipeline.finishPendingTranslations()
+        snapshot = await pipeline.currentSnapshot()
+        XCTAssertEqual(snapshot.finalSegments.first?.translatedText, "英文字幕不应被翻译阻塞。")
     }
 
     func testPipelineReplacesRealtimeTranscriptWithChunkedOfflineTranscript() async {
@@ -516,5 +546,27 @@ private struct TestTranslationEngine: TranslationEngine {
 
     func translate(_ text: String, context: TranslationContext) async throws -> String {
         "译文：\(text)"
+    }
+}
+
+private final class DeferredTranslationEngine: TranslationEngine, @unchecked Sendable {
+    let identifier = "deferred"
+
+    private let stream: AsyncStream<String>
+    private let continuation: AsyncStream<String>.Continuation
+
+    init() {
+        let pair = AsyncStream<String>.makeStream()
+        stream = pair.stream
+        continuation = pair.continuation
+    }
+
+    func translate(_ text: String, context: TranslationContext) async throws -> String {
+        var iterator = stream.makeAsyncIterator()
+        return await iterator.next() ?? ""
+    }
+
+    func complete(with translation: String) {
+        continuation.yield(translation)
     }
 }

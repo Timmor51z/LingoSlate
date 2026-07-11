@@ -28,6 +28,10 @@
 - Parakeet Unified 0.6B streaming high-accuracy tier with retained long-session context.
 - User-selectable energy-saving and high-accuracy modes in the macOS workspace.
 - Benchmark model/audio selectors for repeatable local A/B comparisons.
+- Local school and country or region profile settings.
+- Course-name warmup for terminology and real-time/post-class ASR models.
+- Apple Translation integration for on-device English-to-Simplified-Chinese subtitles.
+- Non-blocking translation jobs that keep English subtitles live during translation preparation.
 
 ## Verification status
 
@@ -35,7 +39,7 @@
 - All Swift source files pass `swiftc -parse`.
 - Full package build and tests run with the external Xcode selected through `DEVELOPER_DIR`.
 - `swift test` builds the shared core, Mac executable, and test bundle successfully.
-- All 17 core tests pass, covering adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio levels, course readiness, approved terminology, lifecycle transitions, subtitle translation, and JSON persistence.
+- All 33 tests pass, covering adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio levels, course readiness, approved terminology, lifecycle transitions, non-blocking subtitle translation, Apple translation coordination, and JSON persistence.
 
 Set the external Xcode as the active developer directory once:
 
@@ -54,15 +58,14 @@ swift test
 3. Download the selected local model on first use (approximately 120 MB or 595 MB).
 4. Capture and convert microphone audio locally; apply adaptive gain only to the energy-saving tier.
 5. Emit provisional and final English segments from FluidAudio.
-6. Pass final segments into the bilingual subtitle pipeline.
-7. Persist the completed session locally.
+6. Publish final English segments immediately and translate them locally through Apple Translation.
+7. Persist the completed bilingual session locally.
 
 ## Next production slice
 
-1. Replace the placeholder translator with Apple `TranslationSession`.
-2. Add inverse text normalization for dates, times, and numbers.
-3. Add model download progress, cancellation, and preflight readiness.
-4. Run live subtitle, battery, thermal, and 90-minute soak tests.
-5. Add a high-accuracy overlapping-window post-class transcription pass.
+1. Add inverse text normalization for dates, times, and numbers.
+2. Add detailed model download progress and preflight readiness.
+3. Run live subtitle, battery, thermal, and 90-minute soak tests.
+4. Add post-class summary generation and bilingual export.
 
 Soniox, automatic course preparation, and summary generation follow after the local bilingual path is stable.

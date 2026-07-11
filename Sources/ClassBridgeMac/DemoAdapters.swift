@@ -1,24 +1,6 @@
 import ClassBridgeCore
 import Foundation
 
-struct DemoTranslationEngine: TranslationEngine {
-    let identifier = "demo-translation"
-
-    private let translations: [String: String] = [
-        "Today we will look at how an event loop schedules asynchronous work.":
-            "今天我们将了解事件循环如何调度异步任务。",
-        "The call stack must be empty before the queued callback can run.":
-            "调用栈必须清空后，队列中的回调才能运行。",
-        "This distinction becomes important when we debug timing problems.":
-            "当我们调试时序问题时，这一区别会变得很重要。",
-        "Please mark this diagram because it will be useful for the assignment.":
-            "请标记这张图，因为它会对作业有所帮助。",
-    ]
-
-    func translate(_ text: String, context: TranslationContext) async throws -> String {
-        translations[text] ?? "［等待本地翻译模型］"
-    }
-}
 actor DemoRecognitionEngine: SpeechRecognitionEngine {
     nonisolated let events: AsyncStream<RecognitionEvent>
 
