@@ -121,7 +121,7 @@ public actor SubtitlePipeline {
         with text: String,
         duration: TimeInterval,
         provider: String,
-        maximumWordsPerSegment: Int = 80
+        maximumWordsPerSegment: Int = 36
     ) async -> Bool {
         cancelPendingTranslations()
         let text = termNormalizer.normalize(text)

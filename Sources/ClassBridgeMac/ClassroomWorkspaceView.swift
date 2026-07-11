@@ -74,6 +74,7 @@ struct ClassroomWorkspaceView: View {
             .pickerStyle(.segmented)
             .frame(width: 170)
             .disabled(model.isActive || model.isWarmingUp)
+            .help("高精度适合课堂和会议；省电适合近距离清晰语音")
 
             Spacer(minLength: 12)
 

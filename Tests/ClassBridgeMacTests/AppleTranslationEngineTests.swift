@@ -4,6 +4,17 @@ import XCTest
 
 final class AppleTranslationEngineTests: XCTestCase {
     @MainActor
+    func testActivationPrefersHighFidelityTranslationOnCurrentSystems() {
+        let engine = AppleTranslationEngine()
+
+        engine.activate()
+
+        if #available(macOS 26.4, *) {
+            XCTAssertEqual(engine.configuration?.preferredStrategy, .highFidelity)
+        }
+    }
+
+    @MainActor
     func testPreparationAndTranslationUseTheAttachedSession() async throws {
         let engine = AppleTranslationEngine()
         let session = TestAppleTranslationSession()
@@ -49,6 +60,76 @@ final class AppleTranslationEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testTranslationNormalizesFragmentsAndProtectsCourseTerms() async throws {
+        let engine = AppleTranslationEngine()
+        let session = TestAppleTranslationSession()
+        let preparation = Task { await engine.prepare(timeout: 1) }
+        let runner = Task { await engine.run(session: session) }
+        let isReady = await preparation.value
+        XCTAssertTrue(isReady)
+
+        _ = try await engine.translate(
+            "  Welcome   to STEAM and MyWaikato  ",
+            context: TranslationContext(
+                course: Course(
+                    name: "Orientation",
+                    recognitionTerms: ["STEAM", "MyWaikato"]
+                ),
+                recentSourceText: []
+            )
+        )
+
+        XCTAssertEqual(
+            session.translatedInputs.map { String($0.characters) },
+            ["Welcome to STEAM and MyWaikato."]
+        )
+        if #available(macOS 26.4, *) {
+            let protectedText = session.translatedInputs[0].runs.compactMap { run -> String? in
+                guard run.translation.skipsTranslation == true else { return nil }
+                return String(session.translatedInputs[0][run.range].characters)
+            }
+            XCTAssertEqual(protectedText, ["STEAM", "MyWaikato"])
+        }
+
+        runner.cancel()
+        await runner.value
+    }
+
+    @MainActor
+    func testApprovedGlossaryUsesPreferredChineseTerm() async throws {
+        let engine = AppleTranslationEngine()
+        let session = TestAppleTranslationSession()
+        let preparation = Task { await engine.prepare(timeout: 1) }
+        let runner = Task { await engine.run(session: session) }
+        let isReady = await preparation.value
+        XCTAssertTrue(isReady)
+
+        _ = try await engine.translate(
+            "A finite-state machine handles transitions.",
+            context: TranslationContext(
+                course: Course(name: "Software Architecture"),
+                recentSourceText: [],
+                approvedTerms: [
+                    GlossaryTerm(
+                        source: "finite-state machine",
+                        target: "有限状态机",
+                        origin: .user,
+                        isApproved: true
+                    ),
+                ]
+            )
+        )
+
+        XCTAssertEqual(
+            session.translatedInputs.map { String($0.characters) },
+            ["A 有限状态机 handles transitions."]
+        )
+
+        runner.cancel()
+        await runner.value
+    }
+
+    @MainActor
     func testPreparationFailureIsReportedWithoutAPlaceholderTranslation() async {
         let engine = AppleTranslationEngine()
         let session = TestAppleTranslationSession(preparationError: TestError.unavailable)
@@ -81,6 +162,7 @@ private final class TestAppleTranslationSession: AppleTranslationSessionProtocol
     private let translationDelay: Duration
     private var concurrentTranslations = 0
     private(set) var maximumConcurrentTranslations = 0
+    private(set) var translatedInputs: [AttributedString] = []
 
     init(
         preparationError: Error? = nil,
@@ -96,8 +178,9 @@ private final class TestAppleTranslationSession: AppleTranslationSessionProtocol
         }
     }
 
-    func translateText(_ text: String) async throws -> String {
+    func translateText(_ text: AttributedString) async throws -> String {
         concurrentTranslations += 1
+        translatedInputs.append(text)
         maximumConcurrentTranslations = max(
             maximumConcurrentTranslations,
             concurrentTranslations
@@ -106,7 +189,7 @@ private final class TestAppleTranslationSession: AppleTranslationSessionProtocol
             try await Task.sleep(for: translationDelay)
         }
         concurrentTranslations -= 1
-        return "译文：\(text)"
+        return "译文：\(String(text.characters))"
     }
 
     func cancelPreparation() {}

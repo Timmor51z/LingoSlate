@@ -6,7 +6,7 @@ import Translation
 @MainActor
 protocol AppleTranslationSessionProtocol: AnyObject {
     func prepare() async throws
-    func translateText(_ text: String) async throws -> String
+    func translateText(_ text: AttributedString) async throws -> String
     func cancelPreparation()
 }
 
@@ -70,10 +70,7 @@ final class AppleTranslationEngine: ObservableObject, TranslationEngine {
                 configuration.invalidate()
                 self.configuration = configuration
             } else {
-                configuration = TranslationSession.Configuration(
-                    source: source,
-                    target: target
-                )
+                configuration = Self.makeConfiguration(source: source, target: target)
             }
         case .failed:
             guard retryIfFailed else { return }
@@ -82,10 +79,7 @@ final class AppleTranslationEngine: ObservableObject, TranslationEngine {
                 configuration.invalidate()
                 self.configuration = configuration
             } else {
-                configuration = TranslationSession.Configuration(
-                    source: source,
-                    target: target
-                )
+                configuration = Self.makeConfiguration(source: source, target: target)
             }
         case .preparing, .ready:
             break
@@ -149,13 +143,28 @@ final class AppleTranslationEngine: ObservableObject, TranslationEngine {
         await serialGate.acquire()
         do {
             try Task.checkCancellation()
-            let translation = try await session.translateText(text)
+            let input = AppleTranslationInputBuilder.make(text: text, context: context)
+            let translation = try await session.translateText(input)
             await serialGate.release()
             return translation.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
             await serialGate.release()
             throw error
         }
+    }
+
+    private static func makeConfiguration(
+        source: Locale.Language,
+        target: Locale.Language
+    ) -> TranslationSession.Configuration {
+        if #available(macOS 26.4, *) {
+            return TranslationSession.Configuration(
+                source: source,
+                target: target,
+                preferredStrategy: .highFidelity
+            )
+        }
+        return TranslationSession.Configuration(source: source, target: target)
     }
 
     private func waitUntilReady(
@@ -225,14 +234,143 @@ private final class SystemAppleTranslationSession: AppleTranslationSessionProtoc
         try await session.prepareTranslation()
     }
 
-    func translateText(_ text: String) async throws -> String {
-        try await session.translate(text).targetText
+    func translateText(_ text: AttributedString) async throws -> String {
+        if #available(macOS 26.4, *) {
+            return try await session.translate(text).targetText
+        }
+        return try await session.translate(String(text.characters)).targetText
     }
 
     func cancelPreparation() {
         if #available(macOS 26.0, *) {
             session.cancel()
         }
+    }
+}
+
+private enum AppleTranslationInputBuilder {
+    private struct ProtectedTerm {
+        var source: String
+        var target: String
+    }
+
+    private struct Replacement {
+        var range: Range<String.Index>
+        var target: String
+    }
+
+    static func make(text: String, context: TranslationContext) -> AttributedString {
+        let normalized = normalize(text)
+        guard #available(macOS 26.4, *) else {
+            return AttributedString(normalized)
+        }
+
+        let replacements = protectedReplacements(in: normalized, context: context)
+        guard !replacements.isEmpty else {
+            return AttributedString(normalized)
+        }
+
+        var result = AttributedString()
+        var cursor = normalized.startIndex
+        for replacement in replacements {
+            result.append(AttributedString(String(normalized[cursor..<replacement.range.lowerBound])))
+            var protectedText = AttributedString(replacement.target)
+            protectedText.translation.skipsTranslation = true
+            result.append(protectedText)
+            cursor = replacement.range.upperBound
+        }
+        result.append(AttributedString(String(normalized[cursor...])))
+        return result
+    }
+
+    private static func normalize(_ text: String) -> String {
+        var normalized = text
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        guard let last = normalized.last else { return normalized }
+        if !".!?;:".contains(last) {
+            normalized.append(".")
+        }
+        return normalized
+    }
+
+    private static func protectedReplacements(
+        in text: String,
+        context: TranslationContext
+    ) -> [Replacement] {
+        let terms = protectedTerms(context: context)
+        var replacements: [Replacement] = []
+
+        for term in terms.sorted(by: { $0.source.count > $1.source.count }) {
+            var searchStart = text.startIndex
+            while searchStart < text.endIndex,
+                  let range = text.range(
+                    of: term.source,
+                    options: [.caseInsensitive, .diacriticInsensitive],
+                    range: searchStart..<text.endIndex
+                  ) {
+                if hasWordBoundaries(range, in: text),
+                   !replacements.contains(where: { $0.range.overlaps(range) }) {
+                    replacements.append(Replacement(range: range, target: term.target))
+                }
+                searchStart = range.upperBound
+            }
+        }
+
+        return replacements.sorted { $0.range.lowerBound < $1.range.lowerBound }
+    }
+
+    private static func protectedTerms(context: TranslationContext) -> [ProtectedTerm] {
+        var terms: [ProtectedTerm] = []
+        var seen: Set<String> = []
+
+        func append(source: String, target: String) {
+            let source = source.trimmingCharacters(in: .whitespacesAndNewlines)
+            let target = target.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !source.isEmpty, !target.isEmpty else { return }
+            let key = source.lowercased()
+            guard seen.insert(key).inserted else { return }
+            terms.append(ProtectedTerm(source: source, target: target))
+        }
+
+        for term in context.approvedTerms {
+            append(source: term.source, target: term.target)
+            for alias in term.aliases {
+                append(source: alias, target: term.target)
+            }
+        }
+
+        if let courseCode = context.course.code {
+            append(source: courseCode, target: courseCode)
+        }
+        for term in context.course.recognitionTerms ?? [] where shouldPreserveVerbatim(term) {
+            append(source: term, target: term)
+        }
+        return terms
+    }
+
+    private static func shouldPreserveVerbatim(_ term: String) -> Bool {
+        let letters = term.filter(\.isLetter)
+        let isAcronym = letters.count >= 2 && letters.allSatisfy(\.isUppercase)
+        let hasInternalUppercase = term.dropFirst().contains(where: \.isUppercase)
+        return isAcronym || hasInternalUppercase || term.contains(where: \.isNumber)
+    }
+
+    private static func hasWordBoundaries(
+        _ range: Range<String.Index>,
+        in text: String
+    ) -> Bool {
+        let leftIsWord = range.lowerBound > text.startIndex
+            && text[text.index(before: range.lowerBound)].isLetterOrNumber
+        let rightIsWord = range.upperBound < text.endIndex
+            && text[range.upperBound].isLetterOrNumber
+        return !leftIsWord && !rightIsWord
+    }
+}
+
+private extension Character {
+    var isLetterOrNumber: Bool {
+        isLetter || isNumber
     }
 }
 
