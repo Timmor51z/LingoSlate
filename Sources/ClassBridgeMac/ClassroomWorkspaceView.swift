@@ -2,7 +2,14 @@ import ClassBridgeCore
 import SwiftUI
 
 struct ClassroomWorkspaceView: View {
-    @StateObject private var model = AppModel()
+    @Environment(\.openSettings) private var openSettings
+    @StateObject private var model: AppModel
+
+    init(profileStore: UserProfileStore) {
+        _model = StateObject(
+            wrappedValue: AppModel(profileStore: profileStore)
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -27,7 +34,7 @@ struct ClassroomWorkspaceView: View {
 
             TextField("Waikato, MyWaikato, Panopto", text: $model.courseTermsText)
                 .textFieldStyle(.plain)
-                .disabled(model.isActive)
+                .disabled(model.isActive || model.isWarmingUp)
         }
         .font(.callout)
         .padding(.horizontal, 18)
@@ -40,7 +47,7 @@ struct ClassroomWorkspaceView: View {
             TextField("课程名称", text: $model.courseName)
                 .textFieldStyle(.roundedBorder)
                 .frame(minWidth: 260, idealWidth: 360, maxWidth: 440)
-                .disabled(model.isActive)
+                .disabled(model.isActive || model.isWarmingUp)
 
             Picker("场景", selection: $model.sessionKind) {
                 Text("课堂").tag(SessionKind.lecture)
@@ -48,7 +55,7 @@ struct ClassroomWorkspaceView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 150)
-            .disabled(model.isActive)
+            .disabled(model.isActive || model.isWarmingUp)
 
             Picker("模式", selection: $model.processingMode) {
                 Text("省电").tag(ProcessingMode.local)
@@ -56,9 +63,27 @@ struct ClassroomWorkspaceView: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 170)
-            .disabled(model.isActive)
+            .disabled(model.isActive || model.isWarmingUp)
 
             Spacer(minLength: 12)
+
+            Button(action: { openSettings() }) {
+                Image(systemName: "person.crop.circle")
+            }
+            .help("用户资料")
+
+            if model.isWarmingUp {
+                Button(action: model.cancelWarmup) {
+                    Image(systemName: "xmark.circle")
+                }
+                .help("取消预热")
+            } else if !model.isActive, model.lifecycleState != .completed {
+                Button(action: model.warmUpCourse) {
+                    Image(systemName: model.isCourseWarm ? "bolt.fill" : "bolt")
+                }
+                .help(model.isCourseWarm ? "课程已预热" : "预热课程")
+                .disabled(!model.canWarmUp)
+            }
 
             if model.isActive {
                 Button(role: .destructive, action: model.stopSession) {
@@ -217,6 +242,9 @@ struct ClassroomWorkspaceView: View {
     }
 
     private var statusIcon: String {
+        if model.isWarmingUp {
+            return "bolt.horizontal.circle"
+        }
         switch model.lifecycleState {
         case .running:
             return "waveform"

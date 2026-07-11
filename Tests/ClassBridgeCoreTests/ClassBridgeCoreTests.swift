@@ -229,6 +229,55 @@ final class ClassBridgeCoreTests: XCTestCase {
         XCTAssertTrue(Course(name: "Mobile Computing").isReadyToStart)
     }
 
+    func testUserProfileNormalizesStoredValues() {
+        let profile = UserProfile(
+            schoolName: "  University of Waikato  ",
+            regionCode: " nz "
+        )
+
+        XCTAssertEqual(profile.schoolName, "University of Waikato")
+        XCTAssertEqual(profile.regionCode, "NZ")
+        XCTAssertTrue(profile.hasSchool)
+    }
+
+    @MainActor
+    func testUserProfileStorePersistsLocally() throws {
+        let suiteName = "LecCueTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = UserProfileStore(
+            defaults: defaults,
+            storageKey: "profile",
+            defaultRegionCode: "NZ"
+        )
+        store.schoolName = "University of Waikato"
+        store.regionCode = "NZ"
+
+        let reloaded = UserProfileStore(
+            defaults: defaults,
+            storageKey: "profile",
+            defaultRegionCode: "US"
+        )
+        XCTAssertEqual(reloaded.profile, store.profile)
+    }
+
+    func testCourseTermSeedsUseCourseAndSchoolContext() {
+        let terms = CourseTermSeedBuilder.suggestions(
+            courseName: "Mobile Computing and Software Architecture",
+            schoolName: "University of Waikato"
+        )
+
+        XCTAssertEqual(
+            terms,
+            [
+                "University of Waikato",
+                "Mobile Computing",
+                "Software Architecture",
+            ]
+        )
+    }
+
     func testCourseDecodesLegacyDataWithoutRecognitionTerms() throws {
         let data = Data(
             #"""

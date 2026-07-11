@@ -17,10 +17,14 @@ This repository currently contains the first local microphone vertical slice:
 - An automatic full-context offline transcription pass before high-accuracy sessions are saved.
 - In-memory session audio buffering that is released after the offline pass and never persisted.
 - Conservative course-name and optional term normalization for proper nouns and technical vocabulary.
+- Local user profile settings for school and country or region.
+- Course warmup that prepares editable terms and preloads the selected real-time model.
 - A native SwiftUI macOS workspace with live input level and real subtitle events.
-- Twenty-six unit tests across the shared core and audio buffer.
+- Twenty-nine unit tests across the shared core and audio buffer.
 
 Energy-saving mode downloads an approximately 120 MB model. High-accuracy mode progressively caches approximately 1.2 GB for its real-time and after-class encoders, then starts from the local Core ML cache. A one-hour 16 kHz mono session uses about 230 MB of temporary memory for the after-class pass. Audio and recognition remain on the Mac. Chinese translation is still a placeholder and is the next production adapter.
+
+On macOS 26 or later, course warmup uses the on-device Apple Foundation Model when available to propose likely English terminology. The suggestions remain editable before the class starts. When Apple Intelligence is unavailable, LecCue still warms the ASR model and derives conservative terms from the course and school names.
 
 ## Build
 

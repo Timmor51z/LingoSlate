@@ -17,10 +17,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var startedAt: Date?
     @Published private(set) var inputLevel: Float = 0
     @Published private(set) var captureSampleRate: Double?
+    @Published private(set) var isWarmingUp = false
 
     private let stateMachine = SessionStateMachine()
     private let sessionStore: SessionStore
     private let postClassAudioBuffer = SessionAudioBuffer()
+    private let profileStore: UserProfileStore
+    private let coursePreparationService = CoursePreparationService()
 
     private var pipeline: SubtitlePipeline?
     private var recognitionEngine: (any SpeechRecognitionEngine)?
@@ -30,8 +33,13 @@ final class AppModel: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var captureTask: Task<Void, Never>?
     private var snapshotTask: Task<Void, Never>?
+    private var warmupTask: Task<Void, Never>?
+    private var coursePreparationTask: Task<CoursePreparationResult, Never>?
+    private var prewarmedEngine: (any SpeechRecognitionEngine)?
+    private var prewarmedSignature: RecognitionWarmupSignature?
 
-    init() {
+    init(profileStore: UserProfileStore = UserProfileStore()) {
+        self.profileStore = profileStore
         let applicationSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -46,6 +54,17 @@ final class AppModel: ObservableObject {
         Course(name: courseName).isReadyToStart
             && lifecycleState == .idle
             && audioSource == .microphone
+            && !isWarmingUp
+    }
+
+    var canWarmUp: Bool {
+        Course(name: courseName).isReadyToStart
+            && lifecycleState == .idle
+            && !isWarmingUp
+    }
+
+    var isCourseWarm: Bool {
+        prewarmedEngine != nil && prewarmedSignature == currentWarmupSignature
     }
 
     var isActive: Bool {
@@ -82,7 +101,10 @@ final class AppModel: ObservableObject {
         let recognitionProfile: LocalRecognitionProfile = processingMode == .highAccuracy
             ? .highAccuracy
             : .energySaver
-        let engine = LocalRecognitionEngineFactory.make(profile: recognitionProfile)
+        let prewarmedEngine = takePrewarmedEngine(for: currentWarmupSignature)
+        let engine = prewarmedEngine
+            ?? LocalRecognitionEngineFactory.make(profile: recognitionProfile)
+        let usesPrewarmedEngine = prewarmedEngine != nil
         let capture = MicrophoneAudioCapture()
         let shouldRunPostClassOptimization = processingMode == .highAccuracy
 
@@ -170,9 +192,13 @@ final class AppModel: ObservableObject {
                 guard await capture.requestPermission() else {
                     throw MicrophoneCaptureError.permissionDenied
                 }
-                self.statusMessage = self.processingMode == .highAccuracy
-                    ? "正在加载高精度模型（首次约 595 MB）"
-                    : "正在加载省电模型（首次约 120 MB）"
+                if usesPrewarmedEngine {
+                    self.statusMessage = "预热模型已就绪"
+                } else {
+                    self.statusMessage = self.processingMode == .highAccuracy
+                        ? "正在加载高精度模型（首次约 595 MB）"
+                        : "正在加载省电模型（首次约 120 MB）"
+                }
                 try await engine.start(configuration: RecognitionConfiguration(course: course))
                 try Task.checkCancellation()
                 try await capture.start()
@@ -209,6 +235,96 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func warmUpCourse() {
+        guard canWarmUp else { return }
+
+        let preparedCourseName = courseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let preparedMode = processingMode
+        let recognitionProfile: LocalRecognitionProfile = preparedMode == .highAccuracy
+            ? .highAccuracy
+            : .energySaver
+        let profile = profileStore.profile
+        let course = Course(
+            name: preparedCourseName,
+            recognitionTerms: parsedCourseTerms
+        )
+
+        isWarmingUp = true
+        statusMessage = "正在准备课程术语"
+        warmupTask = Task { [weak self] in
+            guard let self else { return }
+            await self.discardPrewarmedEngine()
+
+            let preparationTask = Task {
+                await self.coursePreparationService.prepare(
+                    courseName: preparedCourseName,
+                    profile: profile
+                )
+            }
+            self.coursePreparationTask = preparationTask
+            let engine = LocalRecognitionEngineFactory.make(profile: recognitionProfile)
+
+            do {
+                self.statusMessage = "正在预热实时转写模型"
+                try await engine.start(
+                    configuration: RecognitionConfiguration(course: course)
+                )
+                try Task.checkCancellation()
+
+                var offlineModelReady = true
+                if preparedMode == .highAccuracy {
+                    self.statusMessage = "正在确认课后高精度模型"
+                    offlineModelReady = await self.prepareOfflineModel(for: course)
+                    try Task.checkCancellation()
+                }
+
+                let preparation = await preparationTask.value
+                try Task.checkCancellation()
+                guard self.courseName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    == preparedCourseName,
+                      self.processingMode == preparedMode else {
+                    throw CancellationError()
+                }
+
+                self.mergePreparedTerms(preparation.terms)
+                self.prewarmedEngine = engine
+                self.prewarmedSignature = self.currentWarmupSignature
+                self.isWarmingUp = false
+                self.warmupTask = nil
+                self.coursePreparationTask = nil
+
+                if preparedMode == .highAccuracy, !offlineModelReady {
+                    self.statusMessage = "实时模型已预热，课后模型将在结束时加载"
+                } else if preparation.usedFoundationModel {
+                    self.statusMessage = "预热完成，候选术语已生成"
+                } else {
+                    self.statusMessage = "预热完成，学校与课程术语已准备"
+                }
+            } catch is CancellationError {
+                preparationTask.cancel()
+                try? await engine.finalize()
+                self.isWarmingUp = false
+                self.warmupTask = nil
+                self.coursePreparationTask = nil
+                self.statusMessage = "预热已取消"
+            } catch {
+                preparationTask.cancel()
+                try? await engine.finalize()
+                self.isWarmingUp = false
+                self.warmupTask = nil
+                self.coursePreparationTask = nil
+                self.statusMessage = "预热失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    func cancelWarmup() {
+        guard isWarmingUp else { return }
+        statusMessage = "正在取消预热"
+        coursePreparationTask?.cancel()
+        warmupTask?.cancel()
+    }
+
     func addMarker(_ kind: MarkerKind) {
         guard let startedAt, canAddMarker else { return }
         let marker = SessionMarker(
@@ -221,6 +337,8 @@ final class AppModel: ObservableObject {
 
     func resetForNextSession() {
         guard !isActive else { return }
+        warmupTask?.cancel()
+        coursePreparationTask?.cancel()
         startupTask?.cancel()
         eventTask?.cancel()
         captureTask?.cancel()
@@ -229,6 +347,8 @@ final class AppModel: ObservableObject {
         eventTask = nil
         captureTask = nil
         snapshotTask = nil
+        warmupTask = nil
+        coursePreparationTask = nil
         pipeline = nil
         recognitionEngine = nil
         audioCapture = nil
@@ -338,6 +458,67 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func takePrewarmedEngine(
+        for signature: RecognitionWarmupSignature
+    ) -> (any SpeechRecognitionEngine)? {
+        guard prewarmedSignature == signature else {
+            let staleEngine = prewarmedEngine
+            prewarmedEngine = nil
+            prewarmedSignature = nil
+            if let staleEngine {
+                Task { try? await staleEngine.finalize() }
+            }
+            return nil
+        }
+
+        let engine = prewarmedEngine
+        prewarmedEngine = nil
+        prewarmedSignature = nil
+        return engine
+    }
+
+    private func discardPrewarmedEngine() async {
+        let engine = prewarmedEngine
+        prewarmedEngine = nil
+        prewarmedSignature = nil
+        try? await engine?.finalize()
+    }
+
+    private var currentWarmupSignature: RecognitionWarmupSignature {
+        RecognitionWarmupSignature(
+            courseName: courseName.trimmingCharacters(in: .whitespacesAndNewlines),
+            recognitionTerms: parsedCourseTerms,
+            profile: processingMode == .highAccuracy ? .highAccuracy : .energySaver
+        )
+    }
+
+    private func prepareOfflineModel(for course: Course) async -> Bool {
+        let engine = FluidAudioStreamingRecognitionEngine(profile: .unifiedOffline15s)
+        do {
+            try await engine.start(
+                configuration: RecognitionConfiguration(course: course)
+            )
+            try Task.checkCancellation()
+            try await engine.finalize()
+            return true
+        } catch {
+            try? await engine.finalize()
+            return false
+        }
+    }
+
+    private func mergePreparedTerms(_ preparedTerms: [String]) {
+        var seen: Set<String> = []
+        let mergedTerms: [String] = (parsedCourseTerms + preparedTerms).compactMap { term in
+            let term = term.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty else { return nil }
+            let key = term.lowercased()
+            guard seen.insert(key).inserted else { return nil }
+            return term
+        }
+        courseTermsText = mergedTerms.joined(separator: ", ")
+    }
+
     private func runPostClassOptimization(
         pipeline: SubtitlePipeline,
         configuration: RecognitionConfiguration
@@ -381,6 +562,12 @@ final class AppModel: ObservableObject {
         await postClassAudioBuffer.reset()
         await completeSession()
     }
+}
+
+private struct RecognitionWarmupSignature: Equatable {
+    var courseName: String
+    var recognitionTerms: [String]
+    var profile: LocalRecognitionProfile
 }
 
 private actor OfflineTranscriptCollector {
