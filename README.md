@@ -1,5 +1,7 @@
 # LingoSlate
 
+<img src="Resources/LingoSlate-AppIcon.png" alt="LingoSlate app icon" width="128">
+
 LingoSlate is a local-first bilingual classroom companion for international students. The first product is a native macOS app; the shared Swift core is designed for a planned iPhone companion. Product, package, application, and developer-tool names now use the LingoSlate brand consistently.
 
 ## Current slice
@@ -55,6 +57,9 @@ Build a foreground development app with microphone permission metadata and an ad
 ./scripts/build-macos-app.sh
 open .build/LingoSlate.app
 ```
+
+The build script generates the full macOS icon set and `LingoSlate.icns` from
+`Resources/LingoSlate-AppIcon.png` before signing the app bundle.
 
 MLX requires Xcode's optional Metal toolchain. Install it once before the first app build:
 

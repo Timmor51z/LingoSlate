@@ -10,6 +10,8 @@
     <string>LingoSlate</string>
     <key>CFBundleIdentifier</key>
     <string>com.timmor51z.lingoslate</string>
+    <key>CFBundleIconFile</key>
+    <string>LingoSlate.icns</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>

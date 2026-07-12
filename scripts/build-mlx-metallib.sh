@@ -3,14 +3,20 @@
 set -euo pipefail
 
 ROOT_DIR="${0:A:h:h}"
-DEFAULT_XCODE="/Volumes/Disk/Applications/Xcode.app/Contents/Developer"
+SYSTEM_XCODE="/Applications/Xcode.app/Contents/Developer"
+EXTERNAL_XCODE="/Volumes/Disk/Applications/Xcode.app/Contents/Developer"
 CACHE_DIR="$ROOT_DIR/.build/mlx-metal"
 METALLIB_PATH="$CACHE_DIR/mlx.metallib"
 DERIVED_DATA="$ROOT_DIR/.build/mlx-derived-data"
 MLX_PROJECT="$ROOT_DIR/.build/checkouts/mlx-swift/xcode/MLX.xcodeproj"
 
-if [[ -z "${DEVELOPER_DIR:-}" && -d "$DEFAULT_XCODE" ]]; then
-    export DEVELOPER_DIR="$DEFAULT_XCODE"
+if [[ -z "${DEVELOPER_DIR:-}" ]]; then
+    for candidate in "$SYSTEM_XCODE" "$EXTERNAL_XCODE"; do
+        if [[ -d "$candidate" ]]; then
+            export DEVELOPER_DIR="$candidate"
+            break
+        fi
+    done
 fi
 
 if [[ ! -f "$METALLIB_PATH" ]]; then
