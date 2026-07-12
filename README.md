@@ -85,6 +85,7 @@ Sources/
   ClassBridgeMac/        Native macOS application
   LecCueASRSmoke/        Local audio-file recognition smoke tool
   LecCueBenchmark/       Private same-audio ASR benchmark
+  LecCueTranscriptBenchmark/ External Whisper transcript benchmark
   LecCueTranslationBenchmark/ Private sampled translation benchmark
 Tests/
   ClassBridgeCoreTests/  Shared core tests

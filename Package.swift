@@ -17,6 +17,10 @@ let package = Package(
         .executable(name: "LecCueASRSmoke", targets: ["LecCueASRSmoke"]),
         .executable(name: "LecCueBenchmark", targets: ["LecCueBenchmark"]),
         .executable(
+            name: "LecCueTranscriptBenchmark",
+            targets: ["LecCueTranscriptBenchmark"]
+        ),
+        .executable(
             name: "LecCueTranslationBenchmark",
             targets: ["LecCueTranslationBenchmark"]
         ),
@@ -82,6 +86,10 @@ let package = Package(
                 "ClassBridgeAudio",
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ]
+        ),
+        .executableTarget(
+            name: "LecCueTranscriptBenchmark",
+            dependencies: ["ClassBridgeCore"]
         ),
         .executableTarget(
             name: "LecCueTranslationBenchmark",

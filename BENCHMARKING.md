@@ -40,6 +40,20 @@ swift run LecCueBenchmark \
 
 Available model values are `eou120m`, `unified640`, `unified1120`, `unifiedOffline`, and `nemotron1120`. Audio values are `raw` and `adaptive`. High-accuracy models download their private local Core ML assets on first use. The offline model buffers the complete audio and emits its transcript only at finish.
 
+Use a source range to isolate difficult material such as distant student questions without
+creating a second reference file:
+
+```bash
+swift run LecCueBenchmark \
+  --model unifiedOffline \
+  --audio raw \
+  --start-seconds 2600 \
+  --duration-seconds 960 \
+  Benchmarks/Private/<session-id>/reference.json \
+  Benchmarks/Private/<session-id>/audio-16k.wav \
+  BenchmarkResults/Private/<session-id>/question-range.json
+```
+
 The preparation script converts the downloaded source to 16 kHz mono PCM WAV. The benchmark intentionally rejects compressed input because AVFoundation can terminate the process instead of returning a recoverable decoding error for malformed or decoder-incompatible files.
 
 The report includes:
@@ -77,6 +91,55 @@ realtime for Unified 1120 ms and 16.28% at 72.36x realtime for Unified offline. 
 half-point movement does not change the product decision. The repeat also confirmed that the
 competitor transcript contains errors such as `STEAM` for spoken `STEM`, so these figures must
 remain agreement diagnostics rather than advertised WER.
+
+### Distant student questions
+
+The final 15 minutes 57 seconds of the same recording contains audience questions and is much
+harder than the lecturer-led portion. A targeted July 12 comparison produced:
+
+| Recognizer | Agreement error | Word recall | Word precision | Speed |
+| --- | ---: | ---: | ---: | ---: |
+| Unified 1120 ms streaming, raw | 27.99% | 78.80% | 92.36% | 9.03x realtime |
+| Unified offline 15 s, raw | **24.30%** | 80.44% | **93.55%** | **72.30x realtime** |
+| Unified offline 15 s, adaptive gain | 25.03% | 80.09% | 93.33% | 63.85x realtime |
+| Nemotron 1120 ms streaming, raw | 33.20% | 71.84% | 92.15% | 8.46x realtime |
+| OpenAI Whisper medium.en, CPU | 28.08% | 82.17% | 91.42% | 0.98x realtime |
+| MLX Whisper medium.en 4-bit, default decoding | 31.21% | 80.00% | 92.61% | about 15x realtime |
+| MLX Whisper medium.en 4-bit, forced weak-speech decoding | 42.60% | 81.42% | 82.70% | about 16x realtime |
+
+Unified offline remains the post-class default. Nemotron and quantized Whisper did not improve
+this recording, and adaptive gain slightly damaged the offline result. Unquantized Whisper
+recovered more reference words than Unified offline, but produced more substitutions and was
+slower than realtime; its total agreement error remained 3.78 percentage points worse. Raising Whisper's
+no-speech threshold recovered more quiet words but introduced enough plausible hallucinations
+to make the transcript substantially worse. Course warmup should therefore constrain spelling,
+proper nouns, and translation terminology; it must not force low-confidence audio to decode as
+speech.
+
+These figures also explain the remaining product gap: the question range is about 49% worse
+than the complete-session Unified offline diagnostic. The next material gain is more likely to
+come from microphone placement, explicit question-mode capture, or a manually evaluated
+low-confidence repair path than from swapping between the tested local model variants.
+
+## Compare an external Whisper transcript
+
+`LecCueTranscriptBenchmark` imports the JSON emitted by OpenAI Whisper or MLX Whisper and runs
+the same transcript normalization, edit-distance, coverage, number-recall, and acronym-recall
+metrics as the native benchmark:
+
+```bash
+swift run LecCueTranscriptBenchmark \
+  --start-seconds 2600 \
+  --duration-seconds 960 \
+  --label "MLX Whisper medium.en 4-bit" \
+  Benchmarks/Private/<session-id>/reference.json \
+  /path/to/whisper-output.json \
+  BenchmarkResults/Private/<session-id>/whisper-report.json
+```
+
+Some MLX Whisper diagnostic fields contain bare `NaN` or `Infinity` values. The importer converts
+only those non-string tokens to `null`, ignores the diagnostic fields, and records the repair in
+the report caveats. Transcript text and timestamps are not rewritten.
 
 ## Ground truth
 

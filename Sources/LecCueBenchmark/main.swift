@@ -49,6 +49,8 @@ private struct BenchmarkReport: Codable {
     var referenceSession: ReferenceSession
     var model: String
     var audioEnhancement: String
+    var evaluationStartSeconds: Double
+    var evaluationEndSeconds: Double
     var audioDurationSeconds: Double
     var audioDecodeSeconds: Double
     var modelLoadSeconds: Double
@@ -81,7 +83,10 @@ private enum BenchmarkError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidArguments:
-            return "Usage: swift run LecCueBenchmark [--model eou120m|unified640|unified1120|unifiedOffline|nemotron1120] [--audio raw|adaptive] <reference.json> <audio-file> <report.json>"
+            return "Usage: swift run LecCueBenchmark "
+                + "[--model eou120m|unified640|unified1120|unifiedOffline|nemotron1120] "
+                + "[--audio raw|adaptive] [--start-seconds N] [--duration-seconds N] "
+                + "<reference.json> <audio-file> <report.json>"
         case let .recognitionFailed(message):
             return "Recognition failed: \(message)"
         case let .unsupportedAudioFormat(fileExtension):
@@ -141,6 +146,8 @@ private enum BenchmarkAudio: String {
 private struct BenchmarkOptions {
     var model: BenchmarkModel = .eou120m
     var audio: BenchmarkAudio = .raw
+    var startSeconds: Double = 0
+    var durationSeconds: Double?
     var referenceURL: URL
     var audioURL: URL
     var reportURL: URL
@@ -148,6 +155,8 @@ private struct BenchmarkOptions {
     static func parse(_ arguments: [String]) throws -> BenchmarkOptions {
         var model = BenchmarkModel.eou120m
         var audio = BenchmarkAudio.raw
+        var startSeconds = 0.0
+        var durationSeconds: Double?
         var paths: [String] = []
         var index = 0
 
@@ -167,6 +176,20 @@ private struct BenchmarkOptions {
                     throw BenchmarkError.invalidArguments
                 }
                 audio = value
+            case "--start-seconds":
+                index += 1
+                guard index < arguments.count,
+                      let value = Double(arguments[index]), value >= 0 else {
+                    throw BenchmarkError.invalidArguments
+                }
+                startSeconds = value
+            case "--duration-seconds":
+                index += 1
+                guard index < arguments.count,
+                      let value = Double(arguments[index]), value > 0 else {
+                    throw BenchmarkError.invalidArguments
+                }
+                durationSeconds = value
             default:
                 paths.append(arguments[index])
             }
@@ -179,6 +202,8 @@ private struct BenchmarkOptions {
         return BenchmarkOptions(
             model: model,
             audio: audio,
+            startSeconds: startSeconds,
+            durationSeconds: durationSeconds,
             referenceURL: URL(fileURLWithPath: paths[0]),
             audioURL: URL(fileURLWithPath: paths[1]),
             reportURL: URL(fileURLWithPath: paths[2])
@@ -244,10 +269,32 @@ private struct LecCueBenchmark {
         }
 
         let decodeStartedAt = Date()
-        let samples = try AudioConverter().resampleAudioFile(options.audioURL)
+        let allSamples = try AudioConverter().resampleAudioFile(options.audioURL)
         let audioDecodeSeconds = Date().timeIntervalSince(decodeStartedAt)
         let sampleRate = 16_000.0
+        let fullAudioDurationSeconds = Double(allSamples.count) / sampleRate
+        guard options.startSeconds < fullAudioDurationSeconds else {
+            throw BenchmarkError.invalidArguments
+        }
+        let startSample = min(
+            allSamples.count,
+            Int((options.startSeconds * sampleRate).rounded(.down))
+        )
+        let requestedEndSeconds = options.durationSeconds.map {
+            options.startSeconds + $0
+        } ?? fullAudioDurationSeconds
+        let endSample = min(
+            allSamples.count,
+            Int((requestedEndSeconds * sampleRate).rounded(.up))
+        )
+        let samples = Array(allSamples[startSample..<max(startSample, endSample)])
+        let evaluationStartSeconds = Double(startSample) / sampleRate
         let audioDurationSeconds = Double(samples.count) / sampleRate
+        let evaluationEndSeconds = evaluationStartSeconds + audioDurationSeconds
+        let selectedReferenceSegments = reference.segments.filter { segment in
+            let midpoint = (segment.startMs + segment.endMs) / 2_000
+            return midpoint >= evaluationStartSeconds && midpoint < evaluationEndSeconds
+        }
 
         let baseEngine = options.model.makeEngine()
         let engine: any SpeechRecognitionEngine = options.audio == .adaptive
@@ -299,8 +346,14 @@ private struct LecCueBenchmark {
 
         await eventTask.value
         let inferenceSeconds = Date().timeIntervalSince(inferenceStartedAt)
-        let hypothesisSegments = try await collector.result()
-        let referenceText = reference.segments.map(\.text).joined(separator: " ")
+        let hypothesisSegments = (try await collector.result()).map { segment in
+            HypothesisSegment(
+                text: segment.text,
+                startSeconds: segment.startSeconds + evaluationStartSeconds,
+                endSeconds: segment.endSeconds + evaluationStartSeconds
+            )
+        }
+        let referenceText = selectedReferenceSegments.map(\.text).joined(separator: " ")
         let hypothesisText = hypothesisSegments.map(\.text).joined(separator: " ")
         let globalDistance = TranscriptComparison.evaluationWordEditDistance(
             reference: referenceText,
@@ -322,9 +375,10 @@ private struct LecCueBenchmark {
             : (hypothesisText.isEmpty ? 0 : 1)
         let windows = options.model.supportsTimestampWindows
             ? makeWindowReports(
-                reference: reference.segments,
+                reference: selectedReferenceSegments,
                 hypothesis: hypothesisSegments,
-                durationSeconds: max(reference.session.durationSeconds, audioDurationSeconds)
+                startSeconds: evaluationStartSeconds,
+                endSeconds: evaluationEndSeconds
             )
             : []
         let aggregateErrors = options.model.supportsTimestampWindows
@@ -346,18 +400,20 @@ private struct LecCueBenchmark {
         )
 
         let report = BenchmarkReport(
-            schemaVersion: 5,
+            schemaVersion: 6,
             generatedAt: Date(),
             referenceKind: "LecSync competitor output; not manually corrected ground truth",
             referenceSession: reference.session,
             model: options.model.displayName,
             audioEnhancement: options.audio.rawValue,
+            evaluationStartSeconds: evaluationStartSeconds,
+            evaluationEndSeconds: evaluationEndSeconds,
             audioDurationSeconds: audioDurationSeconds,
             audioDecodeSeconds: audioDecodeSeconds,
             modelLoadSeconds: modelLoadSeconds,
             inferenceSeconds: inferenceSeconds,
             realTimeSpeedup: audioDurationSeconds / max(inferenceSeconds, 0.001),
-            referenceSegmentCount: reference.segments.count,
+            referenceSegmentCount: selectedReferenceSegments.count,
             hypothesisSegmentCount: hypothesisSegments.count,
             agreementWindowSeconds: 300,
             normalizationProfile: "case-folded alphanumeric words; contractions, "
@@ -376,6 +432,7 @@ private struct LecCueBenchmark {
             translationComparisonStatus: "Not run: LecCue local Chinese translation is not integrated yet",
             caveats: [
                 "LecSync text is a competitor baseline, not ground truth.",
+                "The report covers audio from \(evaluationStartSeconds) to \(evaluationEndSeconds) seconds.",
                 "Word errors are aggregated in five-minute timestamp windows to reduce segment-boundary penalties.",
                 "Global agreement follows transcript word order and is the primary model-comparison metric.",
                 "Primary global agreement removes formatting-only differences in "
@@ -404,20 +461,27 @@ private struct LecCueBenchmark {
         print(String(format: "Local inference speed: %.2fx realtime", report.realTimeSpeedup))
         print("Model: \(options.model.displayName)")
         print("Audio enhancement: \(options.audio.rawValue)")
+        print(String(
+            format: "Evaluation range: %.2f-%.2f seconds",
+            evaluationStartSeconds,
+            evaluationEndSeconds
+        ))
         print("Report: \(options.reportURL.path)")
     }
 
     private static func makeWindowReports(
         reference: [ReferenceSegment],
         hypothesis: [HypothesisSegment],
-        durationSeconds: Double
+        startSeconds: Double,
+        endSeconds: Double
     ) -> [WindowReport] {
         let windowSize = 300.0
+        let durationSeconds = max(0, endSeconds - startSeconds)
         let windowCount = max(1, Int(ceil(durationSeconds / windowSize)))
 
         return (0..<windowCount).map { index in
-            let start = Double(index) * windowSize
-            let end = min(start + windowSize, durationSeconds)
+            let start = startSeconds + Double(index) * windowSize
+            let end = min(start + windowSize, endSeconds)
             let referenceText = reference
                 .filter { segment in
                     let midpoint = (segment.startMs + segment.endMs) / 2_000
