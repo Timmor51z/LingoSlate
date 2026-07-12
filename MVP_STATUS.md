@@ -8,6 +8,7 @@
 - Validated session lifecycle transitions.
 - Provisional-to-final subtitle pipeline with translation context.
 - Atomic local JSON session persistence.
+- Local 16 kHz mono AAC M4A recording linked to each saved session, with playback and Finder access.
 - Native macOS SwiftUI classroom workspace.
 - Deterministic recognition and translation adapters for end-to-end UI development.
 - Unit tests covering zero-preparation courses, approved terminology, lifecycle transitions, subtitle translation, and persistence.
@@ -43,7 +44,7 @@
 - All Swift source files pass `swiftc -parse`.
 - Full package build and tests run with the external Xcode selected through `DEVELOPER_DIR`.
 - `swift test` builds the shared core, Mac executable, and test bundle successfully.
-- All 55 tests pass, with one optional local-model smoke test skipped when its model path is not configured. Coverage includes adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio input preflight, course readiness, approved terminology, brand migration, lifecycle transitions, non-blocking subtitle translation, Apple translation coordination, deterministic summaries, long-session sampling, summary rendering, and JSON persistence.
+- All 57 tests pass, with one optional local-model smoke test skipped when its model path is not configured. Coverage includes adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio input preflight, M4A encoding and decoding, optional course naming, approved terminology, brand migration, lifecycle transitions, non-blocking subtitle translation, Apple translation coordination, deterministic summaries, long-session sampling, summary rendering, and JSON persistence.
 
 Set the external Xcode as the active developer directory once:
 
@@ -64,7 +65,7 @@ swift test
 5. Emit provisional and final English segments from FluidAudio.
 6. Publish final English segments immediately and translate them locally through Apple Translation.
 7. Generate a local structured summary with deterministic fallback behavior.
-8. Persist the completed bilingual session and summary locally.
+8. Persist the original M4A recording, completed bilingual session, and summary locally.
 
 ## Next production slice
 

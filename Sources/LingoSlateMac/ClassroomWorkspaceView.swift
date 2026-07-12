@@ -54,7 +54,7 @@ struct ClassroomWorkspaceView: View {
 
     private var sessionToolbar: some View {
         HStack(spacing: 12) {
-            TextField("课程名称", text: $model.courseName)
+            TextField("课程名称（可选）", text: $model.courseName)
                 .textFieldStyle(.roundedBorder)
                 .frame(minWidth: 260, idealWidth: 360, maxWidth: 440)
                 .disabled(model.isActive || model.isWarmingUp)
@@ -175,13 +175,31 @@ struct ClassroomWorkspaceView: View {
     private var transcriptSurface: some View {
         if model.lifecycleState == .completed {
             VStack(spacing: 0) {
-                Picker("课后内容", selection: $completedSurface) {
-                    Text("摘要").tag(CompletedSurface.summary)
-                    Text("全文").tag(CompletedSurface.transcript)
+                HStack(spacing: 8) {
+                    Picker("课后内容", selection: $completedSurface) {
+                        Text("摘要").tag(CompletedSurface.summary)
+                        Text("全文").tag(CompletedSurface.transcript)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 220)
+
+                    if model.savedAudioURL != nil {
+                        Button(action: model.playSavedAudio) {
+                            Image(systemName: "play.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .frame(width: 28, height: 28)
+                        .help("播放本地录音")
+
+                        Button(action: model.revealSavedAudio) {
+                            Image(systemName: "folder")
+                        }
+                        .buttonStyle(.borderless)
+                        .frame(width: 28, height: 28)
+                        .help("在 Finder 中显示录音")
+                    }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 220)
                 .padding(.vertical, 10)
 
                 Divider()
@@ -207,7 +225,7 @@ struct ClassroomWorkspaceView: View {
                         ContentUnavailableView(
                             "等待课堂字幕",
                             systemImage: "captions.bubble",
-                            description: Text("输入课程名称后开始")
+                            description: Text("可直接开始，课程名称用于增强术语识别")
                         )
                         .frame(maxWidth: .infinity, minHeight: 360)
                     }

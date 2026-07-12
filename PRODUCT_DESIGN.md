@@ -6,7 +6,7 @@
 
 LingoSlate focuses on one complete workflow:
 
-1. Select a course by name; materials and glossary are optional.
+1. Start immediately; course name, materials, and glossary are optional context.
 2. Capture English speech from the microphone or Mac system audio.
 3. Display stable English and Chinese subtitles in real time.
 4. Mark important moments without interrupting listening.
@@ -26,7 +26,7 @@ An international student attending English-taught university courses who can gen
 
 - Understand the current sentence without waiting for a full translation.
 - Verify names, numbers, definitions, assignment requirements, and deadlines.
-- Start immediately with only a course name and a rough description.
+- Start immediately without creating a course profile or supplying materials.
 - Let the course profile learn terminology across successive classes.
 - Review what was taught without replaying the full class.
 - Keep ordinary classes private and free to process locally.
@@ -47,7 +47,7 @@ An international student attending English-taught university courses who can gen
 1. **Listening comes first.** The live screen contains subtitles, status, and marking controls only.
 2. **Stable text beats fast flicker.** Provisional English may update quickly, but Chinese is generated from stable clauses.
 3. **Cloud use is explicit.** The app never silently changes from local to cloud processing.
-4. **Zero preparation is a first-class path.** A course name is enough to start; documents are optional enhancements.
+4. **Zero preparation is a first-class path.** Recording can start with no course name or documents; supplied context is an optional enhancement.
 5. **Course context grows over time.** Approved terms, corrections, and prior sessions improve later classes.
 6. **Every note is traceable.** Summary items link back to transcript timestamps and, when retained, audio.
 7. **The app degrades gracefully.** Network loss, model loading, permissions, and low battery have visible recovery states.
@@ -62,14 +62,14 @@ An international student attending English-taught university courses who can gen
 - English speech recognition using an on-device Core ML model.
 - English-to-Simplified-Chinese translation using Apple Translation.
 - Optional Soniox real-time transcription and translation.
-- Lightweight course profiles requiring only a course name.
+- Optional lightweight course profiles requiring only a name when the student chooses to create one.
 - Source-attributed course discovery and starter preparation packs.
 - Adaptive glossary suggestions from transcripts, corrections, and translation inconsistencies.
 - Optional PDF, TXT, and Markdown source document import.
 - Local extraction and review of candidate course terms when documents exist.
 - Bilingual live subtitles with provisional and final states.
 - Bookmark, important point, question, and action-item markers.
-- Local transcript, optional audio recording, and structured post-session summary.
+- Local bilingual transcript, original audio recording, and structured post-session summary. The Mac MVP retains audio locally by default for study and review.
 - Markdown, plain text, and SRT/VTT export.
 - Per-session usage and cloud cost display.
 
@@ -111,7 +111,8 @@ The app remains usable for transcript capture if Chinese translation or local su
 
 ### 6.2 Create a course
 
-The only required field is:
+Creating a course profile is optional and never blocks an immediate recording. When the student
+chooses to create one, the only required field is:
 
 - Course name.
 
@@ -126,7 +127,7 @@ The target translation language is inherited from app settings and can be change
 
 #### Zero-preparation path
 
-1. The student enters the course name and, if known, one sentence about the subject.
+1. The student may start unnamed, or enter the course name and a one-sentence description when known.
 2. The app searches the selected institution's public catalogue and shows likely matches with code, year, trimester, and campus.
 3. After the student confirms a match, the app builds a source-attributed starter preparation pack.
 4. If no official match exists, the app may generate a small set of clearly marked, unverified starter terms from the course name and rough description.

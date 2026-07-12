@@ -25,10 +25,17 @@ struct CoursePreparationService: Sendable {
         courseName: String,
         profile: UserProfile
     ) async -> CoursePreparationResult {
+        let courseName = courseName.trimmingCharacters(in: .whitespacesAndNewlines)
         let seedTerms = CourseTermSeedBuilder.suggestions(
             courseName: courseName,
             schoolName: profile.schoolName
         )
+        guard !courseName.isEmpty else {
+            return CoursePreparationResult(
+                terms: seedTerms,
+                usedFoundationModel: false
+            )
+        }
 
         #if canImport(FoundationModels)
         if #available(macOS 26.0, *), SystemLanguageModel.default.isAvailable {

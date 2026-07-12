@@ -162,6 +162,9 @@ public struct TranscriptTermNormalizer: Sendable {
     }
 
     private static func courseNameTerms(_ courseName: String) -> [String] {
+        let courseName = courseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !courseName.isEmpty else { return [] }
+
         var separated = courseName
         for separator in [" and ", " & ", "/", ",", ":"] {
             separated = separated.replacingOccurrences(

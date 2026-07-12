@@ -34,9 +34,6 @@ public struct Course: Codable, Hashable, Identifiable, Sendable {
         self.contextMaturity = max(0, contextMaturity)
     }
 
-    public var isReadyToStart: Bool {
-        !name.isEmpty
-    }
 }
 public struct GlossaryTerm: Codable, Hashable, Identifiable, Sendable {
     public enum Origin: String, Codable, Sendable {
@@ -191,6 +188,7 @@ public struct SessionDocument: Codable, Hashable, Identifiable, Sendable {
     public var segments: [TranscriptSegment]
     public var markers: [SessionMarker]
     public var summary: SessionSummary?
+    public var audioFileName: String?
 
     public init(
         id: UUID = UUID(),
@@ -199,7 +197,8 @@ public struct SessionDocument: Codable, Hashable, Identifiable, Sendable {
         endedAt: Date? = nil,
         segments: [TranscriptSegment] = [],
         markers: [SessionMarker] = [],
-        summary: SessionSummary? = nil
+        summary: SessionSummary? = nil,
+        audioFileName: String? = nil
     ) {
         self.id = id
         self.configuration = configuration
@@ -208,6 +207,7 @@ public struct SessionDocument: Codable, Hashable, Identifiable, Sendable {
         self.segments = segments
         self.markers = markers
         self.summary = summary
+        self.audioFileName = audioFileName?.nilIfBlank
     }
 }
 

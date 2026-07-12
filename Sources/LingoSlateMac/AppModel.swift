@@ -1,12 +1,13 @@
 import LingoSlateAudio
 import LingoSlateCore
 import LingoSlateTranslation
+import AppKit
 import Combine
 import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var courseName = "Mobile Computing and Software Architecture"
+    @Published var courseName = ""
     @Published var courseTermsText = ""
     @Published var sessionKind: SessionKind = .lecture
     @Published var processingMode: ProcessingMode = .highAccuracy
@@ -22,8 +23,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var summary: SessionSummary?
     @Published private(set) var isSummarizing = false
     @Published private(set) var isEnhancedTranslationReady = false
+    @Published private(set) var savedAudioURL: URL?
 
     private let stateMachine = SessionStateMachine()
+    private let sessionDirectoryURL: URL
     private let sessionStore: SessionStore
     private let postClassAudioBuffer = SessionAudioBuffer()
     private let profileStore: UserProfileStore
@@ -48,8 +51,10 @@ final class AppModel: ObservableObject {
     private var prewarmedSignature: RecognitionWarmupSignature?
 
     init(profileStore: UserProfileStore = UserProfileStore()) {
+        let sessionDirectoryURL = Self.sessionDirectory()
         self.profileStore = profileStore
-        sessionStore = SessionStore(directoryURL: Self.sessionDirectory())
+        self.sessionDirectoryURL = sessionDirectoryURL
+        sessionStore = SessionStore(directoryURL: sessionDirectoryURL)
     }
 
     private static func sessionDirectory(
@@ -84,15 +89,13 @@ final class AppModel: ObservableObject {
     }
 
     var canStart: Bool {
-        Course(name: courseName).isReadyToStart
-            && lifecycleState == .idle
+        lifecycleState == .idle
             && audioSource == .microphone
             && !isWarmingUp
     }
 
     var canWarmUp: Bool {
-        Course(name: courseName).isReadyToStart
-            && lifecycleState == .idle
+        lifecycleState == .idle
             && !isWarmingUp
     }
 
@@ -125,7 +128,7 @@ final class AppModel: ObservableObject {
             kind: sessionKind,
             processingMode: processingMode,
             audioSource: audioSource,
-            audioRetention: .discard
+            audioRetention: .keep
         )
         let sessionTranslationEngine: any TranslationEngine = processingMode == .highAccuracy
             ? StagedTranslationEngine(
@@ -159,6 +162,7 @@ final class AppModel: ObservableObject {
         snapshot = TranscriptSnapshot()
         summary = nil
         isSummarizing = false
+        savedAudioURL = nil
         startedAt = nil
         inputLevel = 0
         captureSampleRate = nil
@@ -210,9 +214,7 @@ final class AppModel: ObservableObject {
                     self?.inputLevel = level
                 case let .frame(frame):
                     do {
-                        if shouldRunPostClassOptimization {
-                            await self?.postClassAudioBuffer.append(frame)
-                        }
+                        await self?.postClassAudioBuffer.append(frame)
                         try await engine.accept(frame)
                     } catch {
                         await self?.markFailed(error.localizedDescription)
@@ -420,6 +422,16 @@ final class AppModel: ObservableObject {
         currentDocument?.markers = markers
     }
 
+    func playSavedAudio() {
+        guard let savedAudioURL else { return }
+        NSWorkspace.shared.open(savedAudioURL)
+    }
+
+    func revealSavedAudio() {
+        guard let savedAudioURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([savedAudioURL])
+    }
+
     func resetForNextSession() {
         guard !isActive else { return }
         warmupTask?.cancel()
@@ -445,6 +457,7 @@ final class AppModel: ObservableObject {
         snapshot = TranscriptSnapshot()
         summary = nil
         isSummarizing = false
+        savedAudioURL = nil
         markers = []
         startedAt = nil
         inputLevel = 0
@@ -492,6 +505,7 @@ final class AppModel: ObservableObject {
         let current = await stateMachine.currentState()
         if isFailure(current) { return }
 
+        var audioSaveFailureMessage: String?
         do {
             if current == .running || current == .paused {
                 try await stateMachine.transition(to: .finalizing)
@@ -507,11 +521,31 @@ final class AppModel: ObservableObject {
                 document.endedAt = Date()
                 document.segments = snapshot.finalSegments
                 document.markers = markers
+
+                if document.configuration.audioRetention == .keep,
+                   !(await postClassAudioBuffer.isEmpty) {
+                    statusMessage = "正在保存本地录音"
+                    let audioFileName = "\(document.id.uuidString).m4a"
+                    let audioURL = sessionDirectoryURL.appendingPathComponent(audioFileName)
+                    do {
+                        try await postClassAudioBuffer.writeM4A(to: audioURL)
+                        document.audioFileName = audioFileName
+                        savedAudioURL = audioURL
+                    } catch {
+                        audioSaveFailureMessage = error.localizedDescription
+                    }
+                }
+
                 statusMessage = "正在生成课后摘要"
                 isSummarizing = true
-                let generatedSummary = try await summaryEngine.summarize(document)
-                document.summary = generatedSummary
-                summary = generatedSummary
+                do {
+                    let generatedSummary = try await summaryEngine.summarize(document)
+                    document.summary = generatedSummary
+                    summary = generatedSummary
+                } catch {
+                    document.summary = nil
+                    summary = nil
+                }
                 isSummarizing = false
                 try await sessionStore.save(document)
                 currentDocument = document
@@ -521,7 +555,22 @@ final class AppModel: ObservableObject {
                 try await stateMachine.transition(to: .completed)
             }
             lifecycleState = await stateMachine.currentState()
-            statusMessage = summary?.isEmpty == false ? "摘要已生成" : "已保存"
+            await postClassAudioBuffer.reset()
+            if let audioSaveFailureMessage {
+                statusMessage = "双语文本已保存，但录音保存失败：\(audioSaveFailureMessage)"
+            } else if snapshot.finalSegments.isEmpty, savedAudioURL != nil {
+                statusMessage = "录音已保存到本机，未识别到语音"
+            } else if snapshot.finalSegments.isEmpty {
+                statusMessage = "会话已保存到本机，未捕获到语音"
+            } else if summary?.isEmpty == false, savedAudioURL != nil {
+                statusMessage = "录音、摘要与双语文本已保存到本机"
+            } else if savedAudioURL != nil {
+                statusMessage = "录音与双语文本已保存到本机"
+            } else if summary?.isEmpty == false {
+                statusMessage = "摘要与双语文本已保存到本机"
+            } else {
+                statusMessage = "双语文本已保存到本机"
+            }
         } catch {
             isSummarizing = false
             await markFailed(error.localizedDescription)
@@ -659,7 +708,6 @@ final class AppModel: ObservableObject {
             statusMessage = "课后高精度处理失败，正在保存实时稿"
         }
 
-        await postClassAudioBuffer.reset()
         await completeSession()
     }
 }

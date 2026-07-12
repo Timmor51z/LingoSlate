@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import LingoSlateAudio
 @testable import LingoSlateCore
@@ -209,6 +210,32 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertTrue(isEmpty)
     }
 
+    func testSessionAudioBufferWritesPlayableM4A() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LingoSlateAudioTests-\(UUID().uuidString)")
+        let audioURL = directory.appendingPathComponent("session.m4a")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let samples = (0..<16_000).map { index in
+            Float(sin(2 * Double.pi * 440 * Double(index) / 16_000) * 0.2)
+        }
+        let buffer = SessionAudioBuffer()
+        await buffer.append(
+            AudioFrame(samples: samples, sampleRate: 16_000, capturedAt: 0)
+        )
+
+        try await buffer.writeM4A(to: audioURL)
+
+        let audioFile = try AVAudioFile(forReading: audioURL)
+        let duration = Double(audioFile.length) / audioFile.fileFormat.sampleRate
+        let attributes = try FileManager.default.attributesOfItem(atPath: audioURL.path)
+        let fileSize = try XCTUnwrap(attributes[.size] as? NSNumber).intValue
+        XCTAssertEqual(audioFile.fileFormat.sampleRate, 16_000, accuracy: 0.1)
+        XCTAssertEqual(audioFile.fileFormat.channelCount, 1)
+        XCTAssertGreaterThan(duration, 0.9)
+        XCTAssertLessThan(duration, 1.2)
+        XCTAssertGreaterThan(fileSize, 500)
+    }
+
     func testIncrementalTranscriptCursorReturnsOnlyNewWords() {
         var cursor = IncrementalTranscriptCursor()
 
@@ -257,9 +284,9 @@ final class LingoSlateCoreTests: XCTestCase {
         )
     }
 
-    func testCourseNeedsOnlyAName() {
-        XCTAssertFalse(Course(name: "   ").isReadyToStart)
-        XCTAssertTrue(Course(name: "Mobile Computing").isReadyToStart)
+    func testCourseNameIsOptionalAndNormalized() {
+        XCTAssertEqual(Course(name: "   ").name, "")
+        XCTAssertEqual(Course(name: "  Mobile Computing  ").name, "Mobile Computing")
     }
 
     func testUserProfileNormalizesStoredValues() {
@@ -763,13 +790,18 @@ final class LingoSlateCoreTests: XCTestCase {
     }
 
     func testDeterministicSummaryLimitsOverviewAndHandlesEmptyTranscript() async throws {
-        let segments = (0..<12).map { index in
-            TranscriptSegment(
-                startTime: Double(index * 10),
-                endTime: Double(index * 10 + 5),
-                sourceText: "Topic number \(index)",
-                state: .final,
-                provider: "test"
+        var segments: [TranscriptSegment] = []
+        for index in 0..<12 {
+            let startTime = TimeInterval(index * 10)
+            let sourceText = "Topic number " + String(index)
+            segments.append(
+                TranscriptSegment(
+                    startTime: startTime,
+                    endTime: startTime + 5,
+                    sourceText: sourceText,
+                    state: .final,
+                    provider: "test"
+                )
             )
         }
         let document = SessionDocument(
@@ -797,7 +829,8 @@ final class LingoSlateCoreTests: XCTestCase {
         let store = SessionStore(directoryURL: directory)
         let document = SessionDocument(
             configuration: SessionConfiguration(
-                course: Course(name: "Advanced Databases")
+                course: Course(name: "Advanced Databases"),
+                audioRetention: .keep
             ),
             segments: [
                 TranscriptSegment(
@@ -813,7 +846,8 @@ final class LingoSlateCoreTests: XCTestCase {
                 overview: ["介绍了数据库事务。"],
                 keyConcepts: ["Atomicity"],
                 actionItems: []
-            )
+            ),
+            audioFileName: "session.m4a"
         )
 
         try await store.save(document)
@@ -823,6 +857,10 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertEqual(loaded.id, document.id)
         XCTAssertEqual(loaded.configuration, document.configuration)
         XCTAssertEqual(loaded.segments, document.segments)
+        XCTAssertEqual(loaded.segments.first?.sourceText, "Transactions provide atomicity.")
+        XCTAssertEqual(loaded.segments.first?.translatedText, "事务提供原子性。")
+        XCTAssertEqual(loaded.configuration.audioRetention, .keep)
+        XCTAssertEqual(loaded.audioFileName, "session.m4a")
         XCTAssertEqual(loaded.markers, document.markers)
         XCTAssertEqual(loaded.summary, document.summary)
         XCTAssertEqual(
@@ -831,6 +869,10 @@ final class LingoSlateCoreTests: XCTestCase {
             accuracy: 0.001
         )
         XCTAssertEqual(allDocuments.map(\.id), [document.id])
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path),
+            ["\(document.id.uuidString).json"]
+        )
     }
 }
 
