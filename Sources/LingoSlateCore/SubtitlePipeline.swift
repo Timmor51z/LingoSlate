@@ -32,7 +32,9 @@ public actor SubtitlePipeline {
         let subscriptionID = UUID()
         let initialSnapshot = makeSnapshot()
 
-        let pair = AsyncStream<TranscriptSnapshot>.makeStream()
+        let pair = AsyncStream<TranscriptSnapshot>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
         continuations[subscriptionID] = pair.continuation
         pair.continuation.yield(initialSnapshot)
         pair.continuation.onTermination = { [weak self] _ in
@@ -125,7 +127,8 @@ public actor SubtitlePipeline {
         with text: String,
         duration: TimeInterval,
         provider: String,
-        maximumWordsPerSegment: Int = 36
+        maximumWordsPerSegment: Int = 36,
+        progress: (@Sendable (_ completed: Int, _ total: Int) -> Void)? = nil
     ) async -> Bool {
         cancelPendingTranslations()
         let text = termNormalizer.normalize(text)
@@ -161,6 +164,7 @@ public actor SubtitlePipeline {
         }
         provisionalSegment = nil
         publish()
+        progress?(0, finalSegments.count)
 
         for index in finalSegments.indices {
             let segment = finalSegments[index]
@@ -200,6 +204,7 @@ public actor SubtitlePipeline {
                     publish()
                 }
             }
+            progress?(index + 1, finalSegments.count)
         }
         return true
     }

@@ -4,6 +4,7 @@ import Foundation
 
 public enum SessionAudioBufferError: LocalizedError {
     case noAudio
+    case notPrepared
     case inconsistentSampleRate
     case cannotCreateBuffer
 
@@ -11,6 +12,8 @@ public enum SessionAudioBufferError: LocalizedError {
         switch self {
         case .noAudio:
             return "没有可保存的录音"
+        case .notPrepared:
+            return "录音文件尚未准备好"
         case .inconsistentSampleRate:
             return "录音采样率不一致"
         case .cannotCreateBuffer:
@@ -20,94 +23,186 @@ public enum SessionAudioBufferError: LocalizedError {
 }
 
 public actor SessionAudioBuffer {
-    private var frames: [AudioFrame] = []
+    private static let writeChunkSize = 8_192
+    private static let replayChunkSize = 16_000
+
+    private var audioFile: AVAudioFile?
+    private var temporaryURL: URL?
+    private var destinationURL: URL?
+    private var savedURL: URL?
+    private var sampleRate: Double?
+    private var sampleCount: Int64 = 0
+    private var pendingSamples: [Float] = []
 
     public init() {}
 
     public var isEmpty: Bool {
-        frames.isEmpty
+        sampleCount == 0
     }
 
     public var duration: TimeInterval {
-        guard let first = frames.first, let last = frames.last else { return 0 }
-        let lastFrameDuration = Double(last.samples.count) / last.sampleRate
-        return max(0, last.capturedAt - first.capturedAt) + lastFrameDuration
+        guard let sampleRate, sampleRate > 0 else { return 0 }
+        return Double(sampleCount) / sampleRate
     }
 
-    public func append(_ frame: AudioFrame) {
-        guard !frame.samples.isEmpty else { return }
-        frames.append(frame)
-    }
-
-    public func replay(into engine: any SpeechRecognitionEngine) async throws {
-        for frame in frames {
-            try Task.checkCancellation()
-            try await engine.accept(frame)
-        }
-    }
-
-    public func writeM4A(to url: URL) throws {
-        guard let firstFrame = frames.first else {
-            throw SessionAudioBufferError.noAudio
-        }
-        let sampleRate = firstFrame.sampleRate
-        guard sampleRate > 0,
-              frames.allSatisfy({ abs($0.sampleRate - sampleRate) < 0.5 }) else {
-            throw SessionAudioBufferError.inconsistentSampleRate
-        }
-
+    public func prepareRecording(to url: URL) throws {
+        clearState(removingTemporaryFile: true)
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let temporaryURL = url.deletingLastPathComponent().appendingPathComponent(
+        destinationURL = url
+        temporaryURL = url.deletingLastPathComponent().appendingPathComponent(
             ".\(url.deletingPathExtension().lastPathComponent)-\(UUID().uuidString).m4a"
         )
-        defer { try? FileManager.default.removeItem(at: temporaryURL) }
-        try encodeM4A(to: temporaryURL, sampleRate: sampleRate)
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
-        }
-        try FileManager.default.moveItem(at: temporaryURL, to: url)
+        pendingSamples.reserveCapacity(Self.writeChunkSize * 2)
     }
 
-    private func encodeM4A(to url: URL, sampleRate: Double) throws {
+    public func append(_ frame: AudioFrame) throws {
+        guard destinationURL != nil, temporaryURL != nil else {
+            throw SessionAudioBufferError.notPrepared
+        }
+        guard !frame.samples.isEmpty else { return }
+        guard frame.sampleRate > 0 else {
+            throw SessionAudioBufferError.inconsistentSampleRate
+        }
+
+        if let sampleRate {
+            guard abs(frame.sampleRate - sampleRate) < 0.5 else {
+                throw SessionAudioBufferError.inconsistentSampleRate
+            }
+        } else {
+            sampleRate = frame.sampleRate
+            try openAudioFile(sampleRate: frame.sampleRate)
+        }
+
+        pendingSamples.append(contentsOf: frame.samples)
+        sampleCount += Int64(frame.samples.count)
+        if pendingSamples.count >= Self.writeChunkSize {
+            try flushPendingSamples()
+        }
+    }
+
+    @discardableResult
+    public func finishWriting() throws -> URL? {
+        if let savedURL { return savedURL }
+        guard let destinationURL, let temporaryURL else {
+            throw SessionAudioBufferError.notPrepared
+        }
+        guard sampleCount > 0 else {
+            audioFile = nil
+            try? FileManager.default.removeItem(at: temporaryURL)
+            self.temporaryURL = nil
+            return nil
+        }
+
+        try flushPendingSamples()
+        audioFile = nil
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+        try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
+        self.temporaryURL = nil
+        savedURL = destinationURL
+        return destinationURL
+    }
+
+    public func replay(into engine: any SpeechRecognitionEngine) async throws {
+        guard let url = try finishWriting() else {
+            throw SessionAudioBufferError.noAudio
+        }
+        let file = try AVAudioFile(forReading: url)
+        let format = file.processingFormat
+        guard format.channelCount == 1,
+              let buffer = AVAudioPCMBuffer(
+                  pcmFormat: format,
+                  frameCapacity: AVAudioFrameCount(Self.replayChunkSize)
+              ) else {
+            throw SessionAudioBufferError.cannotCreateBuffer
+        }
+
+        var emittedSampleCount: Int64 = 0
+        while file.framePosition < file.length {
+            try Task.checkCancellation()
+            buffer.frameLength = 0
+            let remainingFrameCount = file.length - file.framePosition
+            let requestedFrameCount = min(
+                AVAudioFramePosition(Self.replayChunkSize),
+                remainingFrameCount
+            )
+            try file.read(
+                into: buffer,
+                frameCount: AVAudioFrameCount(requestedFrameCount)
+            )
+            let frameLength = Int(buffer.frameLength)
+            guard frameLength > 0 else { break }
+            guard let channel = buffer.floatChannelData?[0] else {
+                throw SessionAudioBufferError.cannotCreateBuffer
+            }
+            let samples = Array(UnsafeBufferPointer(start: channel, count: frameLength))
+            try await engine.accept(
+                AudioFrame(
+                    samples: samples,
+                    sampleRate: format.sampleRate,
+                    capturedAt: Double(emittedSampleCount) / format.sampleRate
+                )
+            )
+            emittedSampleCount += Int64(frameLength)
+        }
+    }
+
+    public func reset() {
+        clearState(removingTemporaryFile: true)
+    }
+
+    private func openAudioFile(sampleRate: Double) throws {
+        guard let temporaryURL else {
+            throw SessionAudioBufferError.notPrepared
+        }
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: sampleRate,
             AVNumberOfChannelsKey: 1,
             AVEncoderBitRateKey: 32_000,
         ]
-        let file = try AVAudioFile(
-            forWriting: url,
+        audioFile = try AVAudioFile(
+            forWriting: temporaryURL,
             settings: settings,
             commonFormat: .pcmFormatFloat32,
             interleaved: false
         )
-        let format = file.processingFormat
-        let maximumChunkSize = 65_536
-
-        for frame in frames {
-            var offset = 0
-            while offset < frame.samples.count {
-                let sampleCount = min(maximumChunkSize, frame.samples.count - offset)
-                guard let buffer = AVAudioPCMBuffer(
-                    pcmFormat: format,
-                    frameCapacity: AVAudioFrameCount(sampleCount)
-                ), let channel = buffer.floatChannelData?[0] else {
-                    throw SessionAudioBufferError.cannotCreateBuffer
-                }
-                buffer.frameLength = AVAudioFrameCount(sampleCount)
-                frame.samples.withUnsafeBufferPointer { samples in
-                    channel.update(from: samples.baseAddress! + offset, count: sampleCount)
-                }
-                try file.write(from: buffer)
-                offset += sampleCount
-            }
-        }
     }
 
-    public func reset() {
-        frames.removeAll(keepingCapacity: false)
+    private func flushPendingSamples() throws {
+        guard !pendingSamples.isEmpty else { return }
+        guard let audioFile else {
+            throw SessionAudioBufferError.notPrepared
+        }
+        let format = audioFile.processingFormat
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(pendingSamples.count)
+        ), let channel = buffer.floatChannelData?[0] else {
+            throw SessionAudioBufferError.cannotCreateBuffer
+        }
+        buffer.frameLength = AVAudioFrameCount(pendingSamples.count)
+        pendingSamples.withUnsafeBufferPointer { samples in
+            channel.update(from: samples.baseAddress!, count: samples.count)
+        }
+        try audioFile.write(from: buffer)
+        pendingSamples.removeAll(keepingCapacity: true)
+    }
+
+    private func clearState(removingTemporaryFile: Bool) {
+        audioFile = nil
+        if removingTemporaryFile, let temporaryURL {
+            try? FileManager.default.removeItem(at: temporaryURL)
+        }
+        temporaryURL = nil
+        destinationURL = nil
+        savedURL = nil
+        sampleRate = nil
+        sampleCount = 0
+        pendingSamples.removeAll(keepingCapacity: false)
     }
 }

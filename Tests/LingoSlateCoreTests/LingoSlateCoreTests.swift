@@ -183,16 +183,21 @@ final class LingoSlateCoreTests: XCTestCase {
         }
     }
 
-    func testSessionAudioBufferTracksDurationAndReleasesFrames() async {
+    func testSessionAudioBufferTracksDurationAndReleasesFrames() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LingoSlateAudioResetTests-\(UUID().uuidString)")
+        let audioURL = directory.appendingPathComponent("session.m4a")
+        defer { try? FileManager.default.removeItem(at: directory) }
         let buffer = SessionAudioBuffer()
-        await buffer.append(
+        try await buffer.prepareRecording(to: audioURL)
+        try await buffer.append(
             AudioFrame(
                 samples: [Float](repeating: 0.1, count: 3_200),
                 sampleRate: 16_000,
                 capturedAt: 10
             )
         )
-        await buffer.append(
+        try await buffer.append(
             AudioFrame(
                 samples: [Float](repeating: 0.1, count: 3_200),
                 sampleRate: 16_000,
@@ -208,6 +213,7 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertEqual(duration, 0.4, accuracy: 0.001)
         XCTAssertFalse(wasEmpty)
         XCTAssertTrue(isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audioURL.path))
     }
 
     func testSessionAudioBufferWritesPlayableM4A() async throws {
@@ -219,12 +225,14 @@ final class LingoSlateCoreTests: XCTestCase {
             Float(sin(2 * Double.pi * 440 * Double(index) / 16_000) * 0.2)
         }
         let buffer = SessionAudioBuffer()
-        await buffer.append(
+        try await buffer.prepareRecording(to: audioURL)
+        try await buffer.append(
             AudioFrame(samples: samples, sampleRate: 16_000, capturedAt: 0)
         )
 
-        try await buffer.writeM4A(to: audioURL)
+        let savedURL = try await buffer.finishWriting()
 
+        XCTAssertEqual(savedURL, audioURL)
         let audioFile = try AVAudioFile(forReading: audioURL)
         let duration = Double(audioFile.length) / audioFile.fileFormat.sampleRate
         let attributes = try FileManager.default.attributesOfItem(atPath: audioURL.path)
@@ -234,6 +242,33 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertGreaterThan(duration, 0.9)
         XCTAssertLessThan(duration, 1.2)
         XCTAssertGreaterThan(fileSize, 500)
+    }
+
+    func testSessionAudioBufferReplaysSavedAudioInBoundedChunks() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LingoSlateAudioReplayTests-\(UUID().uuidString)")
+        let audioURL = directory.appendingPathComponent("session.m4a")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let buffer = SessionAudioBuffer()
+        let engine = CountingRecognitionEngine()
+        try await buffer.prepareRecording(to: audioURL)
+
+        for index in 0..<60 {
+            try await buffer.append(
+                AudioFrame(
+                    samples: [Float](repeating: 0.05, count: 1_600),
+                    sampleRate: 16_000,
+                    capturedAt: Double(index) / 10
+                )
+            )
+        }
+        try await buffer.replay(into: engine)
+
+        let acceptedSampleCount = await engine.acceptedSampleCount
+        let largestFrameSize = await engine.largestFrameSize
+        XCTAssertGreaterThanOrEqual(acceptedSampleCount, 96_000)
+        XCTAssertLessThanOrEqual(acceptedSampleCount, 98_048)
+        XCTAssertLessThanOrEqual(largestFrameSize, 16_000)
     }
 
     func testIncrementalTranscriptCursorReturnsOnlyNewWords() {
@@ -545,6 +580,31 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertEqual(snapshot.finalSegments.count, 1)
         XCTAssertEqual(snapshot.finalSegments[0].translatedText, "译文：The event loop schedules callbacks.")
         XCTAssertEqual(snapshot.finalSegments[0].state, .translated)
+    }
+
+    func testPipelineSnapshotStreamDropsStaleUIUpdates() async {
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Concurrency"),
+            translationEngine: TestTranslationEngine()
+        )
+        let stream = await pipeline.snapshots()
+        let segmentID = UUID()
+
+        for index in 0..<1_000 {
+            await pipeline.consume(
+                .provisional(
+                    id: segmentID,
+                    text: "Update \(index)",
+                    startTime: 0,
+                    endTime: Double(index),
+                    provider: "test"
+                )
+            )
+        }
+
+        var iterator = stream.makeAsyncIterator()
+        let latest = await iterator.next()
+        XCTAssertEqual(latest?.provisionalSegment?.sourceText, "Update 999")
     }
 
     func testPipelineNormalizesPreferredCourseTermsBeforeTranslation() async {
@@ -881,6 +941,33 @@ private struct TestTranslationEngine: TranslationEngine {
 
     func translate(_ text: String, context: TranslationContext) async throws -> String {
         "译文：\(text)"
+    }
+}
+
+private actor CountingRecognitionEngine: SpeechRecognitionEngine {
+    nonisolated let events: AsyncStream<RecognitionEvent>
+    private let continuation: AsyncStream<RecognitionEvent>.Continuation
+    private(set) var acceptedSampleCount = 0
+    private(set) var largestFrameSize = 0
+
+    init() {
+        let pair = AsyncStream<RecognitionEvent>.makeStream()
+        events = pair.stream
+        continuation = pair.continuation
+    }
+
+    func start(configuration: RecognitionConfiguration) async throws {
+        continuation.yield(.started)
+    }
+
+    func accept(_ frame: AudioFrame) async throws {
+        acceptedSampleCount += frame.samples.count
+        largestFrameSize = max(largestFrameSize, frame.samples.count)
+    }
+
+    func finalize() async throws {
+        continuation.yield(.finished)
+        continuation.finish()
     }
 }
 

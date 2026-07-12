@@ -18,5 +18,6 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertTrue(model.canStart)
         XCTAssertTrue(model.canWarmUp)
+        XCTAssertEqual(model.processingMode, .local)
     }
 }

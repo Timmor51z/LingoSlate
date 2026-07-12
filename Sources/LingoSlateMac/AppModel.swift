@@ -10,7 +10,7 @@ final class AppModel: ObservableObject {
     @Published var courseName = ""
     @Published var courseTermsText = ""
     @Published var sessionKind: SessionKind = .lecture
-    @Published var processingMode: ProcessingMode = .highAccuracy
+    @Published var processingMode: ProcessingMode = .local
     @Published var audioSource: AudioSource = .microphone
     @Published private(set) var lifecycleState: SessionLifecycleState = .idle
     @Published private(set) var snapshot = TranscriptSnapshot()
@@ -153,11 +153,16 @@ final class AppModel: ObservableObject {
         let usesPrewarmedEngine = prewarmedEngine != nil
         let capture = MicrophoneAudioCapture()
         let shouldRunPostClassOptimization = processingMode == .highAccuracy
+        let audioBuffer = postClassAudioBuffer
 
         self.pipeline = pipeline
         recognitionEngine = engine
         audioCapture = capture
-        currentDocument = SessionDocument(configuration: configuration)
+        let document = SessionDocument(configuration: configuration)
+        currentDocument = document
+        let audioURL = sessionDirectoryURL.appendingPathComponent(
+            "\(document.id.uuidString).m4a"
+        )
         markers = []
         snapshot = TranscriptSnapshot()
         summary = nil
@@ -168,53 +173,48 @@ final class AppModel: ObservableObject {
         captureSampleRate = nil
         statusMessage = "正在检查麦克风权限"
 
-        snapshotTask = Task { [weak self] in
+        snapshotTask = Task.detached { [weak self] in
             let stream = await pipeline.snapshots()
             for await value in stream {
                 guard !Task.isCancelled else { return }
-                self?.snapshot = value
+                await self?.receiveSnapshot(value)
             }
         }
 
-        eventTask = Task { [weak self] in
+        eventTask = Task.detached { [weak self] in
             for await event in engine.events {
                 guard !Task.isCancelled else { return }
                 await pipeline.consume(event)
 
                 switch event {
                 case .started:
-                    self?.statusMessage = "模型已就绪，正在连接麦克风"
+                    await self?.receiveRecognitionStarted()
                 case let .failed(message):
                     await self?.markFailed(message)
                 case .finished:
-                    if shouldRunPostClassOptimization {
-                        await self?.runPostClassOptimization(
-                            pipeline: pipeline,
-                            configuration: RecognitionConfiguration(course: course)
-                        )
-                    } else {
-                        await self?.completeSession()
-                    }
+                    await self?.receiveRecognitionFinished(
+                        pipeline: pipeline,
+                        course: course,
+                        runsPostClassOptimization: shouldRunPostClassOptimization
+                    )
                 default:
                     break
                 }
             }
         }
 
-        captureTask = Task { [weak self] in
+        captureTask = Task.detached(priority: .userInitiated) { [weak self] in
             for await event in capture.events {
                 guard !Task.isCancelled else { return }
 
                 switch event {
                 case let .started(sampleRate):
-                    self?.captureSampleRate = sampleRate
-                    await self?.markRunning()
-                    self?.statusMessage = "正在收听"
+                    await self?.receiveCaptureStarted(sampleRate: sampleRate)
                 case let .inputLevel(level):
-                    self?.inputLevel = level
+                    await self?.receiveInputLevel(level)
                 case let .frame(frame):
                     do {
-                        await self?.postClassAudioBuffer.append(frame)
+                        try await audioBuffer.append(frame)
                         try await engine.accept(frame)
                     } catch {
                         await self?.markFailed(error.localizedDescription)
@@ -224,7 +224,7 @@ final class AppModel: ObservableObject {
                     await self?.markFailed(message)
                     return
                 case .stopped:
-                    self?.inputLevel = 0
+                    await self?.receiveCaptureStopped()
                 }
             }
         }
@@ -233,6 +233,7 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             do {
                 await self.postClassAudioBuffer.reset()
+                try await self.postClassAudioBuffer.prepareRecording(to: audioURL)
                 try await self.stateMachine.transition(to: .preparing)
                 self.lifecycleState = await self.stateMachine.currentState()
 
@@ -270,6 +271,7 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 await audioCapture?.stop()
+                await captureTask?.value
                 let current = await stateMachine.currentState()
                 if current == .running || current == .paused {
                     try await stateMachine.transition(to: .finalizing)
@@ -311,19 +313,9 @@ final class AppModel: ObservableObject {
             let translationTask = Task {
                 await self.translationEngine.prepare()
             }
-            let refinementTask = Task {
-                guard preparedMode == .highAccuracy else { return false }
-                return await self.refinementTranslationEngine.prepare { [weak self] progress in
-                    let percent = Int((progress.fractionCompleted * 100).rounded())
-                    Task { @MainActor [weak self] in
-                        guard self?.isWarmingUp == true else { return }
-                        self?.statusMessage = "正在准备本地精译模型 \(percent)%"
-                    }
-                }
-            }
             self.coursePreparationTask = preparationTask
             self.translationPreparationTask = translationTask
-            self.refinementPreparationTask = refinementTask
+            self.refinementPreparationTask = nil
             let engine = LocalRecognitionEngineFactory.make(profile: recognitionProfile)
 
             do {
@@ -333,19 +325,25 @@ final class AppModel: ObservableObject {
                 )
                 try Task.checkCancellation()
 
-                var offlineModelReady = true
-                if preparedMode == .highAccuracy {
-                    self.statusMessage = "正在确认课后高精度模型"
-                    offlineModelReady = await self.prepareOfflineModel(for: course)
-                    try Task.checkCancellation()
-                }
-
                 let preparation = await preparationTask.value
                 let translationReady = await translationTask.value
+                let refinementReady: Bool
                 if preparedMode == .highAccuracy {
                     self.statusMessage = "正在加载本地精译模型"
+                    let refinementTask = Task {
+                        await self.refinementTranslationEngine.prepare { [weak self] progress in
+                            let percent = Int((progress.fractionCompleted * 100).rounded())
+                            Task { @MainActor [weak self] in
+                                guard self?.isWarmingUp == true else { return }
+                                self?.statusMessage = "正在准备本地精译模型 \(percent)%"
+                            }
+                        }
+                    }
+                    self.refinementPreparationTask = refinementTask
+                    refinementReady = await refinementTask.value
+                } else {
+                    refinementReady = false
                 }
-                let refinementReady = await refinementTask.value
                 try Task.checkCancellation()
                 guard self.courseName.trimmingCharacters(in: .whitespacesAndNewlines)
                     == preparedCourseName,
@@ -367,10 +365,8 @@ final class AppModel: ObservableObject {
                     self.statusMessage = "转写已预热，翻译语言包尚未就绪"
                 } else if preparedMode == .highAccuracy, !refinementReady {
                     self.statusMessage = "预热完成，本地精译未就绪，将使用快速翻译"
-                } else if preparedMode == .highAccuracy, !offlineModelReady {
-                    self.statusMessage = "实时模型已预热，课后模型将在结束时加载"
                 } else if preparedMode == .highAccuracy {
-                    self.statusMessage = "预热完成，高质量本地精译已就绪"
+                    self.statusMessage = "预热完成，高质量精译已就绪；课后模型按需加载"
                 } else if preparation.usedFoundationModel {
                     self.statusMessage = "预热完成，候选术语已生成"
                 } else {
@@ -379,7 +375,7 @@ final class AppModel: ObservableObject {
             } catch is CancellationError {
                 preparationTask.cancel()
                 translationTask.cancel()
-                refinementTask.cancel()
+                self.refinementPreparationTask?.cancel()
                 try? await engine.finalize()
                 self.isWarmingUp = false
                 self.warmupTask = nil
@@ -390,7 +386,7 @@ final class AppModel: ObservableObject {
             } catch {
                 preparationTask.cancel()
                 translationTask.cancel()
-                refinementTask.cancel()
+                self.refinementPreparationTask?.cancel()
                 try? await engine.finalize()
                 self.isWarmingUp = false
                 self.warmupTask = nil
@@ -488,6 +484,45 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func receiveSnapshot(_ value: TranscriptSnapshot) {
+        snapshot = value
+    }
+
+    private func receiveRecognitionStarted() {
+        statusMessage = "模型已就绪，正在连接麦克风"
+    }
+
+    private func receiveRecognitionFinished(
+        pipeline: SubtitlePipeline,
+        course: Course,
+        runsPostClassOptimization: Bool
+    ) async {
+        recognitionEngine = nil
+        audioCapture = nil
+        if runsPostClassOptimization {
+            await runPostClassOptimization(
+                pipeline: pipeline,
+                configuration: RecognitionConfiguration(course: course)
+            )
+        } else {
+            await completeSession()
+        }
+    }
+
+    private func receiveCaptureStarted(sampleRate: Double) async {
+        captureSampleRate = sampleRate
+        await markRunning()
+        statusMessage = "正在收听"
+    }
+
+    private func receiveInputLevel(_ level: Float) {
+        inputLevel = level
+    }
+
+    private func receiveCaptureStopped() {
+        inputLevel = 0
+    }
+
     private func markFailed(_ message: String) async {
         await audioCapture?.stop()
         await postClassAudioBuffer.reset()
@@ -522,15 +557,13 @@ final class AppModel: ObservableObject {
                 document.segments = snapshot.finalSegments
                 document.markers = markers
 
-                if document.configuration.audioRetention == .keep,
-                   !(await postClassAudioBuffer.isEmpty) {
-                    statusMessage = "正在保存本地录音"
-                    let audioFileName = "\(document.id.uuidString).m4a"
-                    let audioURL = sessionDirectoryURL.appendingPathComponent(audioFileName)
+                if document.configuration.audioRetention == .keep {
+                    statusMessage = "正在完成本地录音"
                     do {
-                        try await postClassAudioBuffer.writeM4A(to: audioURL)
-                        document.audioFileName = audioFileName
-                        savedAudioURL = audioURL
+                        if let audioURL = try await postClassAudioBuffer.finishWriting() {
+                            document.audioFileName = audioURL.lastPathComponent
+                            savedAudioURL = audioURL
+                        }
                     } catch {
                         audioSaveFailureMessage = error.localizedDescription
                     }
@@ -641,21 +674,6 @@ final class AppModel: ObservableObject {
         )
     }
 
-    private func prepareOfflineModel(for course: Course) async -> Bool {
-        let engine = FluidAudioStreamingRecognitionEngine(profile: .unifiedOffline15s)
-        do {
-            try await engine.start(
-                configuration: RecognitionConfiguration(course: course)
-            )
-            try Task.checkCancellation()
-            try await engine.finalize()
-            return true
-        } catch {
-            try? await engine.finalize()
-            return false
-        }
-    }
-
     private func mergePreparedTerms(_ preparedTerms: [String]) {
         var seen: Set<String> = []
         let mergedTerms: [String] = (parsedCourseTerms + preparedTerms).compactMap { term in
@@ -699,7 +717,14 @@ final class AppModel: ObservableObject {
                 _ = await pipeline.replaceFinalTranscript(
                     with: transcript,
                     duration: duration,
-                    provider: offlineProfile.providerIdentifier
+                    provider: offlineProfile.providerIdentifier,
+                    maximumWordsPerSegment: 60,
+                    progress: { [weak self] completed, total in
+                        Task { @MainActor [weak self] in
+                            guard total > 0 else { return }
+                            self?.statusMessage = "正在优化课后双语稿 \(completed)/\(total)"
+                        }
+                    }
                 )
             }
         } catch {

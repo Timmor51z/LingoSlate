@@ -36,7 +36,9 @@ public actor MicrophoneAudioCapture: AudioCaptureEngine {
     private let inputDeviceIsAvailable: @Sendable () -> Bool
 
     public init() {
-        let pair = AsyncStream<AudioCaptureEvent>.makeStream()
+        let pair = AsyncStream<AudioCaptureEvent>.makeStream(
+            bufferingPolicy: .bufferingNewest(512)
+        )
         events = pair.stream
         continuation = pair.continuation
         inputDeviceIsAvailable = {
@@ -45,7 +47,9 @@ public actor MicrophoneAudioCapture: AudioCaptureEngine {
     }
 
     init(inputDeviceIsAvailable: @escaping @Sendable () -> Bool) {
-        let pair = AsyncStream<AudioCaptureEvent>.makeStream()
+        let pair = AsyncStream<AudioCaptureEvent>.makeStream(
+            bufferingPolicy: .bufferingNewest(512)
+        )
         events = pair.stream
         continuation = pair.continuation
         self.inputDeviceIsAvailable = inputDeviceIsAvailable
@@ -139,6 +143,7 @@ private final class TapState: @unchecked Sendable {
     private let converter: AVAudioConverter
     private let outputFormat: AVAudioFormat
     private let continuation: AsyncStream<AudioCaptureEvent>.Continuation
+    private var lastLevelEmissionTime: TimeInterval = 0
 
     init(
         converter: AVAudioConverter,
@@ -186,7 +191,11 @@ private final class TapState: @unchecked Sendable {
             sampleRate: outputFormat.sampleRate,
             capturedAt: ProcessInfo.processInfo.systemUptime
         )
-        continuation.yield(.inputLevel(frame.normalizedLevel))
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - lastLevelEmissionTime >= 0.1 {
+            lastLevelEmissionTime = now
+            continuation.yield(.inputLevel(frame.normalizedLevel))
+        }
         continuation.yield(
             .frame(frame)
         )

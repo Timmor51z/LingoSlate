@@ -9,6 +9,8 @@
 - Provisional-to-final subtitle pipeline with translation context.
 - Atomic local JSON session persistence.
 - Local 16 kHz mono AAC M4A recording linked to each saved session, with playback and Finder access.
+- Bounded subtitle and microphone event streams, 10 Hz input metering, and disk-backed after-class audio replay for long-session stability.
+- Energy-saving recognition by default, sequential heavyweight model warmup, and explicit post-class translation progress.
 - Native macOS SwiftUI classroom workspace.
 - Deterministic recognition and translation adapters for end-to-end UI development.
 - Unit tests covering zero-preparation courses, approved terminology, lifecycle transitions, subtitle translation, and persistence.
@@ -44,7 +46,7 @@
 - All Swift source files pass `swiftc -parse`.
 - Full package build and tests run with the external Xcode selected through `DEVELOPER_DIR`.
 - `swift test` builds the shared core, Mac executable, and test bundle successfully.
-- All 57 tests pass, with one optional local-model smoke test skipped when its model path is not configured. Coverage includes adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio input preflight, M4A encoding and decoding, optional course naming, approved terminology, brand migration, lifecycle transitions, non-blocking subtitle translation, Apple translation coordination, deterministic summaries, long-session sampling, summary rendering, and JSON persistence.
+- All 59 tests pass, with one optional local-model smoke test skipped when its model path is not configured. Coverage includes bounded snapshot delivery, adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio input preflight, M4A encoding, decoding, and chunked replay, optional course naming, approved terminology, brand migration, lifecycle transitions, non-blocking subtitle translation, Apple translation coordination, deterministic summaries, long-session sampling, summary rendering, and JSON persistence.
 
 Set the external Xcode as the active developer directory once:
 

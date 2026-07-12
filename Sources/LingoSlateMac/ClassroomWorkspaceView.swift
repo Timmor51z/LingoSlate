@@ -3,9 +3,15 @@ import SwiftUI
 import Translation
 
 struct ClassroomWorkspaceView: View {
+    private enum FocusedField: Hashable {
+        case courseName
+        case courseTerms
+    }
+
     @Environment(\.openSettings) private var openSettings
     @StateObject private var model: AppModel
     @State private var completedSurface: CompletedSurface = .summary
+    @FocusState private var focusedField: FocusedField?
 
     init(profileStore: UserProfileStore) {
         _model = StateObject(
@@ -31,8 +37,16 @@ struct ClassroomWorkspaceView: View {
             AppleTranslationSessionHost(engine: model.translationEngine)
         }
         .onChange(of: model.lifecycleState) { _, state in
+            if state != .idle {
+                focusedField = nil
+            }
             if state == .completed {
                 completedSurface = .summary
+            }
+        }
+        .onChange(of: model.isWarmingUp) { _, isWarmingUp in
+            if isWarmingUp {
+                focusedField = nil
             }
         }
     }
@@ -44,6 +58,7 @@ struct ClassroomWorkspaceView: View {
 
             TextField("Waikato, MyWaikato, Panopto", text: $model.courseTermsText)
                 .textFieldStyle(.plain)
+                .focused($focusedField, equals: .courseTerms)
                 .disabled(model.isActive || model.isWarmingUp)
         }
         .font(.callout)
@@ -56,6 +71,7 @@ struct ClassroomWorkspaceView: View {
         HStack(spacing: 12) {
             TextField("课程名称（可选）", text: $model.courseName)
                 .textFieldStyle(.roundedBorder)
+                .focused($focusedField, equals: .courseName)
                 .frame(minWidth: 260, idealWidth: 360, maxWidth: 440)
                 .disabled(model.isActive || model.isWarmingUp)
 
@@ -89,7 +105,10 @@ struct ClassroomWorkspaceView: View {
                 }
                 .help("取消预热")
             } else if !model.isActive, model.lifecycleState != .completed {
-                Button(action: model.warmUpCourse) {
+                Button(action: {
+                    focusedField = nil
+                    model.warmUpCourse()
+                }) {
                     Image(systemName: model.isCourseWarm ? "bolt.fill" : "bolt")
                 }
                 .help(model.isCourseWarm ? "课程已预热" : "预热课程")
@@ -108,7 +127,10 @@ struct ClassroomWorkspaceView: View {
                 }
                 .buttonStyle(.borderedProminent)
             } else {
-                Button(action: model.startSession) {
+                Button(action: {
+                    focusedField = nil
+                    model.startSession()
+                }) {
                     Label("开始", systemImage: "play.fill")
                 }
                 .buttonStyle(.borderedProminent)
@@ -230,10 +252,10 @@ struct ClassroomWorkspaceView: View {
                         .frame(maxWidth: .infinity, minHeight: 360)
                     }
 
-                    ForEach(Array(model.snapshot.finalSegments.enumerated()), id: \.element.id) { index, segment in
+                    ForEach(model.snapshot.finalSegments) { segment in
                         SubtitleRow(
                             segment: segment,
-                            isCurrent: index == model.snapshot.finalSegments.count - 1
+                            isCurrent: segment.id == model.snapshot.finalSegments.last?.id
                         )
                         .id(segment.id)
                     }

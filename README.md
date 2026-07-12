@@ -17,7 +17,7 @@ This repository currently contains the first local microphone vertical slice:
 - FluidAudio Parakeet EOU 120M energy-saving recognition with adaptive gain and limiting.
 - FluidAudio Parakeet Unified 0.6B high-accuracy streaming recognition at 1120 ms context.
 - An automatic full-context offline transcription pass before high-accuracy sessions are saved.
-- Local AAC M4A session recording that is linked to the bilingual transcript and released from memory after saving.
+- Streaming AAC M4A session recording that is linked to the bilingual transcript without retaining the full class in memory.
 - Conservative course-name and optional term normalization for proper nouns and technical vocabulary.
 - Local user profile settings for school and country or region.
 - Course warmup that prepares editable terms and preloads the selected real-time model.
@@ -35,9 +35,9 @@ This repository currently contains the first local microphone vertical slice:
 - Audio-input preflight that reports a missing microphone instead of crashing on headless Macs.
 - iPhone Continuity Camera microphone support through the selected macOS input device.
 - A native SwiftUI macOS workspace with live input level and real subtitle events.
-- Fifty-seven tests across the shared core, audio capture, translation, summary, migration, persistence, and macOS UI adapters.
+- Fifty-nine tests across the shared core, audio capture, translation, summary, migration, persistence, and macOS UI adapters.
 
-Energy-saving mode downloads an approximately 120 MB model. High-accuracy mode progressively caches approximately 1.2 GB for its real-time and after-class encoders. Course warmup also downloads a pinned approximately 2.22 GB MLX TranslateGemma model for the second-stage translation pass. A one-hour 16 kHz mono session uses about 230 MB of temporary memory for the after-class pass. Audio, recognition, and translation remain on the Mac. Apple may ask the user to download the English and Simplified Chinese language package the first time translation is prepared. TranslateGemma is distributed under the [Gemma terms](https://ai.google.dev/gemma/terms) and is downloaded separately rather than bundled in LingoSlate.
+Energy-saving mode is the default and downloads an approximately 120 MB model. High-accuracy mode progressively caches approximately 1.2 GB for its real-time and after-class encoders. Course warmup also downloads a pinned approximately 2.22 GB MLX TranslateGemma model for the second-stage translation pass. Audio streams to disk in bounded chunks, and the after-class pass reads it back in 16,000-sample chunks instead of keeping a full class in memory. UI snapshots retain only the latest pending value, microphone-level updates are capped at 10 Hz, and heavyweight high-accuracy models prepare sequentially. Audio, recognition, and translation remain on the Mac. Apple may ask the user to download the English and Simplified Chinese language package the first time translation is prepared. TranslateGemma is distributed under the [Gemma terms](https://ai.google.dev/gemma/terms) and is downloaded separately rather than bundled in LingoSlate.
 
 Course warmup also prepares Apple Translation so the first stable English clause can be translated without waiting for language-model setup. On macOS 26 or later, warmup uses the on-device Apple Foundation Model when available to propose likely English terminology. The suggestions remain editable before the class starts. When Apple Intelligence is unavailable, LingoSlate still warms the ASR model and derives conservative terms from the course and school names.
 
@@ -54,8 +54,8 @@ timestamps, final English transcript segments, available Chinese translations, m
 post-class summary. The original microphone audio is saved beside the JSON as a 16 kHz mono,
 32 kbps AAC M4A file with the same session UUID, typically using about 15 MB per hour. The JSON
 stores the matching audio filename, and the completed-session view can play or reveal it in
-Finder. Audio remains on the Mac and is released from memory after both the offline pass and
-local save finish.
+Finder. Audio remains on the Mac and is written incrementally so long classes do not accumulate
+raw Float32 frames in memory. High-accuracy replay reads the saved file in bounded chunks.
 
 ## Build
 

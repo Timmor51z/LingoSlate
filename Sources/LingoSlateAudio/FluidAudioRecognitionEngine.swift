@@ -105,8 +105,10 @@ public actor FluidAudioRecognitionEngine: SpeechRecognitionEngine {
                 let transcript = try await manager.finish()
                 receiveFinalTranscript(transcript)
                 await manager.cleanup()
+                self.manager = nil
             } catch {
                 await manager.cleanup()
+                self.manager = nil
                 continuation.yield(.failed(message: error.localizedDescription))
                 continuation.finish()
                 throw error

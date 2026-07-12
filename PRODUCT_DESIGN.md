@@ -256,7 +256,7 @@ Recommended stack:
 - English ASR: benchmark Parakeet Unified English 0.6B and Nemotron Streaming 0.6B through FluidAudio/Core ML.
 - Live translation: Apple Translation.
 - Summary: Apple Foundation Models when available, with a deterministic fallback summary.
-- Storage: SwiftData metadata plus local files for audio and exports.
+- Storage: SwiftData metadata plus incrementally written local files for audio and exports; long recordings must not retain complete raw audio in memory.
 
 Local translation receives finalized clauses, not every provisional token. The clause builder commits on punctuation, endpoint detection, or a configurable silence boundary, while enforcing a maximum wait so long lecturer sentences do not block translation.
 
