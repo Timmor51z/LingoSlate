@@ -8,10 +8,19 @@ struct ClassroomWorkspaceView: View {
         case courseTerms
     }
 
+    private struct TranscriptScrollKey: Equatable {
+        var finalCount: Int
+        var latestSourceLength: Int
+        var latestTranslationLength: Int
+        var provisionalID: UUID?
+        var provisionalLength: Int
+    }
+
     @Environment(\.openSettings) private var openSettings
     @StateObject private var model: AppModel
     @State private var completedSurface: CompletedSurface = .summary
     @FocusState private var focusedField: FocusedField?
+    private let transcriptBottomID = "transcript-bottom"
 
     init(profileStore: UserProfileStore) {
         _model = StateObject(
@@ -264,15 +273,19 @@ struct ClassroomWorkspaceView: View {
                         ProvisionalSubtitleRow(segment: provisional)
                             .id("provisional")
                     }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(transcriptBottomID)
                 }
                 .padding(.horizontal, 32)
                 .padding(.vertical, 20)
             }
-            .onChange(of: model.snapshot.finalSegments.count) {
-                if let id = model.snapshot.finalSegments.last?.id {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(id, anchor: .bottom)
-                    }
+            .onChange(of: transcriptScrollKey) {
+                guard model.isActive else { return }
+                Task { @MainActor in
+                    await Task.yield()
+                    proxy.scrollTo(transcriptBottomID, anchor: .bottom)
                 }
             }
         }
@@ -323,6 +336,18 @@ struct ClassroomWorkspaceView: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var transcriptScrollKey: TranscriptScrollKey {
+        let latest = model.snapshot.finalSegments.last
+        let provisional = model.snapshot.provisionalSegment
+        return TranscriptScrollKey(
+            finalCount: model.snapshot.finalSegments.count,
+            latestSourceLength: latest?.sourceText.count ?? 0,
+            latestTranslationLength: latest?.translatedText?.count ?? 0,
+            provisionalID: provisional?.id,
+            provisionalLength: provisional?.sourceText.count ?? 0
+        )
     }
 
     private var statusIcon: String {

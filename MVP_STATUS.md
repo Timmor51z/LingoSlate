@@ -11,6 +11,8 @@
 - Local 16 kHz mono AAC M4A recording linked to each saved session, with playback and Finder access.
 - Bounded subtitle and microphone event streams, 10 Hz input metering, and disk-backed after-class audio replay for long-session stability.
 - Energy-saving recognition by default, sequential heavyweight model warmup, and explicit post-class translation progress.
+- Fifteen-minute TranslateGemma keep-warm window after high-accuracy sessions, with immediate MLX cache clearing when switching to energy-saving mode; downloaded weights remain cached.
+- Live transcript follow mode reacts to provisional text and translation growth, while after-class high-accuracy work runs at utility priority to keep the end-session transition responsive.
 - Native macOS SwiftUI classroom workspace.
 - Deterministic recognition and translation adapters for end-to-end UI development.
 - Unit tests covering zero-preparation courses, approved terminology, lifecycle transitions, subtitle translation, and persistence.

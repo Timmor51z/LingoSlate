@@ -10,7 +10,16 @@ final class AppModel: ObservableObject {
     @Published var courseName = ""
     @Published var courseTermsText = ""
     @Published var sessionKind: SessionKind = .lecture
-    @Published var processingMode: ProcessingMode = .local
+    @Published var processingMode: ProcessingMode = .local {
+        didSet {
+            guard oldValue != processingMode, processingMode == .local else { return }
+            Task { [weak self] in
+                guard let self else { return }
+                await self.releaseEnhancedTranslationModel()
+                await self.discardPrewarmedEngine()
+            }
+        }
+    }
     @Published var audioSource: AudioSource = .microphone
     @Published private(set) var lifecycleState: SessionLifecycleState = .idle
     @Published private(set) var snapshot = TranscriptSnapshot()
@@ -43,10 +52,12 @@ final class AppModel: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var captureTask: Task<Void, Never>?
     private var snapshotTask: Task<Void, Never>?
+    private var postClassTask: Task<Void, Never>?
     private var warmupTask: Task<Void, Never>?
     private var coursePreparationTask: Task<CoursePreparationResult, Never>?
     private var translationPreparationTask: Task<Bool, Never>?
     private var refinementPreparationTask: Task<Bool, Never>?
+    private var enhancedModelReleaseTask: Task<Void, Never>?
     private var prewarmedEngine: (any SpeechRecognitionEngine)?
     private var prewarmedSignature: RecognitionWarmupSignature?
 
@@ -118,6 +129,10 @@ final class AppModel: ObservableObject {
 
     func startSession() {
         guard canStart else { return }
+        postClassTask?.cancel()
+        postClassTask = nil
+        enhancedModelReleaseTask?.cancel()
+        enhancedModelReleaseTask = nil
 
         let course = Course(
             name: courseName,
@@ -286,6 +301,8 @@ final class AppModel: ObservableObject {
 
     func warmUpCourse() {
         guard canWarmUp else { return }
+        enhancedModelReleaseTask?.cancel()
+        enhancedModelReleaseTask = nil
 
         let preparedCourseName = courseName.trimmingCharacters(in: .whitespacesAndNewlines)
         let preparedMode = processingMode
@@ -438,10 +455,12 @@ final class AppModel: ObservableObject {
         eventTask?.cancel()
         captureTask?.cancel()
         snapshotTask?.cancel()
+        postClassTask?.cancel()
         startupTask = nil
         eventTask = nil
         captureTask = nil
         snapshotTask = nil
+        postClassTask = nil
         warmupTask = nil
         coursePreparationTask = nil
         translationPreparationTask = nil
@@ -500,10 +519,16 @@ final class AppModel: ObservableObject {
         recognitionEngine = nil
         audioCapture = nil
         if runsPostClassOptimization {
-            await runPostClassOptimization(
-                pipeline: pipeline,
-                configuration: RecognitionConfiguration(course: course)
-            )
+            statusMessage = "正在准备课后高精度处理"
+            postClassTask?.cancel()
+            postClassTask = Task(priority: .utility) { [weak self] in
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                await self?.runPostClassOptimization(
+                    pipeline: pipeline,
+                    configuration: RecognitionConfiguration(course: course)
+                )
+            }
         } else {
             await completeSession()
         }
@@ -604,6 +629,9 @@ final class AppModel: ObservableObject {
             } else {
                 statusMessage = "双语文本已保存到本机"
             }
+            if currentDocument?.configuration.processingMode == .highAccuracy {
+                scheduleEnhancedModelRelease()
+            }
         } catch {
             isSummarizing = false
             await markFailed(error.localizedDescription)
@@ -664,6 +692,28 @@ final class AppModel: ObservableObject {
         prewarmedEngine = nil
         prewarmedSignature = nil
         try? await engine?.finalize()
+    }
+
+    private func scheduleEnhancedModelRelease() {
+        enhancedModelReleaseTask?.cancel()
+        enhancedModelReleaseTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(15 * 60))
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled else { return }
+            await self.refinementTranslationEngine.release()
+            self.isEnhancedTranslationReady = false
+            self.enhancedModelReleaseTask = nil
+        }
+    }
+
+    private func releaseEnhancedTranslationModel() async {
+        enhancedModelReleaseTask?.cancel()
+        enhancedModelReleaseTask = nil
+        await refinementTranslationEngine.release()
+        isEnhancedTranslationReady = false
     }
 
     private var currentWarmupSignature: RecognitionWarmupSignature {
@@ -734,6 +784,7 @@ final class AppModel: ObservableObject {
         }
 
         await completeSession()
+        postClassTask = nil
     }
 }
 

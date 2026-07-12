@@ -1,6 +1,7 @@
 import LingoSlateCore
 import Foundation
 import HuggingFace
+import MLX
 import MLXHuggingFace
 import MLXLLM
 import MLXLMCommon
@@ -103,6 +104,12 @@ public actor TranslateGemmaTranslationEngine: TranslationEngine {
             sourceText: text,
             preparedInput: preparedInput
         )
+    }
+
+    public func release() {
+        modelContainer = nil
+        Memory.clearCache()
+        state = .idle
     }
 
     private static var localModelURL: URL? {
