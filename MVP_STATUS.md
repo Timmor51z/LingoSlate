@@ -18,7 +18,7 @@
 - Fully local Parakeet EOU 120M streaming recognition through FluidAudio.
 - Cumulative streaming transcript de-duplication across end-of-utterance boundaries.
 - Unsupported system-audio and cloud controls disabled until their adapters exist.
-- Foreground `LecCue.app` development bundle with microphone usage metadata and ad-hoc signing.
+- Foreground `LingoSlate.app` development bundle with microphone usage metadata and ad-hoc signing.
 - Audio-file smoke tool for repeatable local ASR verification.
 - Finalization silence padding so the last spoken word is not truncated.
 - Private LecSync benchmark importer with signed URLs and account metadata removed.
@@ -43,7 +43,7 @@
 - All Swift source files pass `swiftc -parse`.
 - Full package build and tests run with the external Xcode selected through `DEVELOPER_DIR`.
 - `swift test` builds the shared core, Mac executable, and test bundle successfully.
-- All 38 tests pass, covering adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio input preflight, course readiness, approved terminology, lifecycle transitions, non-blocking subtitle translation, Apple translation coordination, deterministic summaries, long-session sampling, summary rendering, and JSON persistence.
+- All 55 tests pass, with one optional local-model smoke test skipped when its model path is not configured. Coverage includes adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio input preflight, course readiness, approved terminology, brand migration, lifecycle transitions, non-blocking subtitle translation, Apple translation coordination, deterministic summaries, long-session sampling, summary rendering, and JSON persistence.
 
 Set the external Xcode as the active developer directory once:
 

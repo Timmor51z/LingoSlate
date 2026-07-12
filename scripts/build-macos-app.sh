@@ -10,19 +10,19 @@ if [[ -z "${DEVELOPER_DIR:-}" && -d "$DEFAULT_XCODE" ]]; then
 fi
 
 cd "$ROOT_DIR"
-swift build --disable-sandbox -c debug --product ClassBridgeMac
+swift build --disable-sandbox -c debug --product LingoSlateMac
 
 BIN_DIR="$(swift build --disable-sandbox -c debug --show-bin-path)"
 MLX_METALLIB="$("$ROOT_DIR/scripts/build-mlx-metallib.sh")"
-APP_DIR="$ROOT_DIR/.build/LecCue.app"
+APP_DIR="$ROOT_DIR/.build/LingoSlate.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 
 mkdir -p "$MACOS_DIR"
-cp "$ROOT_DIR/Resources/LecCue-Info.plist" "$CONTENTS_DIR/Info.plist"
-cp "$BIN_DIR/ClassBridgeMac" "$MACOS_DIR/LecCue"
+cp "$ROOT_DIR/Resources/LingoSlate-Info.plist" "$CONTENTS_DIR/Info.plist"
+cp "$BIN_DIR/LingoSlateMac" "$MACOS_DIR/LingoSlate"
 cp "$MLX_METALLIB" "$MACOS_DIR/mlx.metallib"
-chmod +x "$MACOS_DIR/LecCue"
+chmod +x "$MACOS_DIR/LingoSlate"
 
 codesign --force --deep --sign - --timestamp=none "$APP_DIR"
 echo "$APP_DIR"

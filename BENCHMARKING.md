@@ -1,11 +1,11 @@
-# LecCue Local Benchmarking
+# LingoSlate Local Benchmarking
 
-The benchmark compares LecCue and LecSync on the same audio. It is designed for private local evaluation and does not treat competitor output as ground truth.
+The benchmark compares LingoSlate and LecSync on the same audio. It is designed for private local evaluation and does not treat competitor output as ground truth.
 
 ## Privacy boundary
 
 - `Benchmarks/Private/` contains source audio and sanitized LecSync references.
-- `BenchmarkResults/Private/` contains LecCue transcripts and reports.
+- `BenchmarkResults/Private/` contains LingoSlate transcripts and reports.
 - Both directories are ignored by Git.
 - The importer removes `userId`, signed audio URLs, raw cache metadata, and account fields from the reference JSON.
 - Never move private benchmark artifacts into a tracked fixture directory.
@@ -27,10 +27,10 @@ Benchmarks/Private/<session-id>/audio-16k.wav
 
 The reference retains only session metadata and segment-level English, Chinese, speaker, timestamps, and confidence.
 
-## Run LecCue
+## Run LingoSlate
 
 ```bash
-swift run LecCueBenchmark \
+swift run LingoSlateBenchmark \
   --model eou120m \
   --audio raw \
   Benchmarks/Private/<session-id>/reference.json \
@@ -44,7 +44,7 @@ Use a source range to isolate difficult material such as distant student questio
 creating a second reference file:
 
 ```bash
-swift run LecCueBenchmark \
+swift run LingoSlateBenchmark \
   --model unifiedOffline \
   --audio raw \
   --start-seconds 2600 \
@@ -66,7 +66,7 @@ The report includes:
 - Number and acronym recall.
 - Audio decoding, model loading, and inference time.
 - Local inference speed relative to real time.
-- Timestamped LecCue hypothesis segments for later manual review.
+- Timestamped LingoSlate hypothesis segments for later manual review.
 
 Five-minute windows reduce false penalties when the two products choose different subtitle boundaries. Word coverage is a second diagnostic that ignores order and timestamps; it shows whether both transcripts contain similar vocabulary, but it is not an accuracy score.
 
@@ -76,7 +76,7 @@ Number recall currently compares written tokens exactly. A result such as spoken
 
 The July 2026 59-minute local comparison against the same LecSync transcript produced:
 
-| LecCue model | Global agreement error | Speed |
+| LingoSlate model | Global agreement error | Speed |
 | --- | ---: | ---: |
 | Unified 640 ms streaming | 22.11% | 7.62x realtime |
 | Unified 1120 ms streaming | 17.85% | 7.29x realtime |
@@ -123,12 +123,12 @@ low-confidence repair path than from swapping between the tested local model var
 
 ## Compare an external Whisper transcript
 
-`LecCueTranscriptBenchmark` imports the JSON emitted by OpenAI Whisper or MLX Whisper and runs
+`LingoSlateTranscriptBenchmark` imports the JSON emitted by OpenAI Whisper or MLX Whisper and runs
 the same transcript normalization, edit-distance, coverage, number-recall, and acronym-recall
 metrics as the native benchmark:
 
 ```bash
-swift run LecCueTranscriptBenchmark \
+swift run LingoSlateTranscriptBenchmark \
   --start-seconds 2600 \
   --duration-seconds 960 \
   --label "MLX Whisper medium.en 4-bit" \
@@ -143,25 +143,25 @@ the report caveats. Transcript text and timestamps are not rewritten.
 
 ## Ground truth
 
-LecSync and LecCue can both make the same mistake. For release-quality WER, manually correct a stratified 10-15 minute subset covering quiet speech, distant speech, accents, technical terms, numbers, and overlapping speakers. Keep that corrected reference private unless every speaker has consented to publication.
+LecSync and LingoSlate can both make the same mistake. For release-quality WER, manually correct a stratified 10-15 minute subset covering quiet speech, distant speech, accents, technical terms, numbers, and overlapping speakers. Keep that corrected reference private unless every speaker has consented to publication.
 
 ## Translation sampling
 
 The translation benchmark uses LecSync English as input so it can measure translation
-separately from LecCue recognition errors. By default it samples 24 segments spread across
-the session and limits inputs to 6-36 words, matching LecCue's production translation chunks.
+separately from LingoSlate recognition errors. By default it samples 24 segments spread across
+the session and limits inputs to 6-36 words, matching LingoSlate's production translation chunks.
 
 ```bash
 ./scripts/build-mlx-metallib.sh
 
 DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer \
-  swift build --disable-sandbox --product LecCueTranslationBenchmark
+  swift build --disable-sandbox --product LingoSlateTranslationBenchmark
 
 cp .build/mlx-metal/mlx.metallib \
   .build/arm64-apple-macosx/debug/mlx.metallib
 
-LECCUE_TRANSLATION_MODEL_PATH=/path/to/translategemma-snapshot \
-  .build/arm64-apple-macosx/debug/LecCueTranslationBenchmark \
+LINGOSLATE_TRANSLATION_MODEL_PATH=/path/to/translategemma-snapshot \
+  .build/arm64-apple-macosx/debug/LingoSlateTranslationBenchmark \
   --sample-count 24 \
   --term Moodle \
   --glossary "paper outline=课程大纲" \

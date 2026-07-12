@@ -3,26 +3,26 @@
 import PackageDescription
 
 let package = Package(
-    name: "ClassBridge",
+    name: "LingoSlate",
     defaultLocalization: "zh-Hans",
     platforms: [
         .macOS(.v15),
         .iOS(.v18),
     ],
     products: [
-        .library(name: "ClassBridgeCore", targets: ["ClassBridgeCore"]),
-        .library(name: "ClassBridgeAudio", targets: ["ClassBridgeAudio"]),
-        .library(name: "ClassBridgeTranslation", targets: ["ClassBridgeTranslation"]),
-        .executable(name: "ClassBridgeMac", targets: ["ClassBridgeMac"]),
-        .executable(name: "LecCueASRSmoke", targets: ["LecCueASRSmoke"]),
-        .executable(name: "LecCueBenchmark", targets: ["LecCueBenchmark"]),
+        .library(name: "LingoSlateCore", targets: ["LingoSlateCore"]),
+        .library(name: "LingoSlateAudio", targets: ["LingoSlateAudio"]),
+        .library(name: "LingoSlateTranslation", targets: ["LingoSlateTranslation"]),
+        .executable(name: "LingoSlateMac", targets: ["LingoSlateMac"]),
+        .executable(name: "LingoSlateASRSmoke", targets: ["LingoSlateASRSmoke"]),
+        .executable(name: "LingoSlateBenchmark", targets: ["LingoSlateBenchmark"]),
         .executable(
-            name: "LecCueTranscriptBenchmark",
-            targets: ["LecCueTranscriptBenchmark"]
+            name: "LingoSlateTranscriptBenchmark",
+            targets: ["LingoSlateTranscriptBenchmark"]
         ),
         .executable(
-            name: "LecCueTranslationBenchmark",
-            targets: ["LecCueTranslationBenchmark"]
+            name: "LingoSlateTranslationBenchmark",
+            targets: ["LingoSlateTranslationBenchmark"]
         ),
     ],
     dependencies: [
@@ -44,18 +44,18 @@ let package = Package(
         ),
     ],
     targets: [
-        .target(name: "ClassBridgeCore"),
+        .target(name: "LingoSlateCore"),
         .target(
-            name: "ClassBridgeAudio",
+            name: "LingoSlateAudio",
             dependencies: [
-                "ClassBridgeCore",
+                "LingoSlateCore",
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ]
         ),
         .target(
-            name: "ClassBridgeTranslation",
+            name: "LingoSlateTranslation",
             dependencies: [
-                "ClassBridgeCore",
+                "LingoSlateCore",
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
@@ -64,50 +64,50 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "ClassBridgeMac",
+            name: "LingoSlateMac",
             dependencies: [
-                "ClassBridgeCore",
-                "ClassBridgeAudio",
-                "ClassBridgeTranslation",
+                "LingoSlateCore",
+                "LingoSlateAudio",
+                "LingoSlateTranslation",
             ]
         ),
         .executableTarget(
-            name: "LecCueASRSmoke",
+            name: "LingoSlateASRSmoke",
             dependencies: [
-                "ClassBridgeCore",
-                "ClassBridgeAudio",
+                "LingoSlateCore",
+                "LingoSlateAudio",
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ]
         ),
         .executableTarget(
-            name: "LecCueBenchmark",
+            name: "LingoSlateBenchmark",
             dependencies: [
-                "ClassBridgeCore",
-                "ClassBridgeAudio",
+                "LingoSlateCore",
+                "LingoSlateAudio",
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ]
         ),
         .executableTarget(
-            name: "LecCueTranscriptBenchmark",
-            dependencies: ["ClassBridgeCore"]
+            name: "LingoSlateTranscriptBenchmark",
+            dependencies: ["LingoSlateCore"]
         ),
         .executableTarget(
-            name: "LecCueTranslationBenchmark",
+            name: "LingoSlateTranslationBenchmark",
             dependencies: [
-                "ClassBridgeCore",
-                "ClassBridgeTranslation",
+                "LingoSlateCore",
+                "LingoSlateTranslation",
             ]
         ),
         .testTarget(
-            name: "ClassBridgeCoreTests",
-            dependencies: ["ClassBridgeCore", "ClassBridgeAudio"]
+            name: "LingoSlateCoreTests",
+            dependencies: ["LingoSlateCore", "LingoSlateAudio"]
         ),
         .testTarget(
-            name: "ClassBridgeMacTests",
+            name: "LingoSlateMacTests",
             dependencies: [
-                "ClassBridgeMac",
-                "ClassBridgeCore",
-                "ClassBridgeTranslation",
+                "LingoSlateMac",
+                "LingoSlateCore",
+                "LingoSlateTranslation",
             ]
         ),
     ]

@@ -18,7 +18,7 @@ Audio duration is 3,556.9 seconds and the LecSync competitor reference contains 
 | --- | ---: | ---: | ---: |
 | Local inference time | 148.5 s | 177.7 s | 466.6 s |
 | Offline processing speed | 23.95x | 20.01x | 7.62x |
-| LecCue hypothesis words | 6,087 | 6,737 | 8,409 |
+| LingoSlate hypothesis words | 6,087 | 6,737 | 8,409 |
 | Agreement error rate | 52.59% | 49.88% | 28.69% |
 | Normalized-word recall | 61.51% | 67.99% | 87.68% |
 | Normalized-word precision | 91.80% | 91.67% | 94.72% |

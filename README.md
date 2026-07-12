@@ -1,6 +1,6 @@
-# LecCue
+# LingoSlate
 
-LecCue is a local-first bilingual classroom companion for international students. The first product is a native macOS app; the shared Swift core is designed for a planned iPhone companion. `ClassBridge` remains the temporary internal Swift module name while the product branding is migrated.
+LingoSlate is a local-first bilingual classroom companion for international students. The first product is a native macOS app; the shared Swift core is designed for a planned iPhone companion. Product, package, application, and developer-tool names now use the LingoSlate brand consistently.
 
 ## Current slice
 
@@ -33,27 +33,27 @@ This repository currently contains the first local microphone vertical slice:
 - Audio-input preflight that reports a missing microphone instead of crashing on headless Macs.
 - iPhone Continuity Camera microphone support through the selected macOS input device.
 - A native SwiftUI macOS workspace with live input level and real subtitle events.
-- Fifty-three tests across the shared core, audio capture, translation, summary, and macOS UI adapters.
+- Fifty-five tests across the shared core, audio capture, translation, summary, migration, and macOS UI adapters.
 
-Energy-saving mode downloads an approximately 120 MB model. High-accuracy mode progressively caches approximately 1.2 GB for its real-time and after-class encoders. Course warmup also downloads a pinned approximately 2.22 GB MLX TranslateGemma model for the second-stage translation pass. A one-hour 16 kHz mono session uses about 230 MB of temporary memory for the after-class pass. Audio, recognition, and translation remain on the Mac. Apple may ask the user to download the English and Simplified Chinese language package the first time translation is prepared. TranslateGemma is distributed under the [Gemma terms](https://ai.google.dev/gemma/terms) and is downloaded separately rather than bundled in LecCue.
+Energy-saving mode downloads an approximately 120 MB model. High-accuracy mode progressively caches approximately 1.2 GB for its real-time and after-class encoders. Course warmup also downloads a pinned approximately 2.22 GB MLX TranslateGemma model for the second-stage translation pass. A one-hour 16 kHz mono session uses about 230 MB of temporary memory for the after-class pass. Audio, recognition, and translation remain on the Mac. Apple may ask the user to download the English and Simplified Chinese language package the first time translation is prepared. TranslateGemma is distributed under the [Gemma terms](https://ai.google.dev/gemma/terms) and is downloaded separately rather than bundled in LingoSlate.
 
-Course warmup also prepares Apple Translation so the first stable English clause can be translated without waiting for language-model setup. On macOS 26 or later, warmup uses the on-device Apple Foundation Model when available to propose likely English terminology. The suggestions remain editable before the class starts. When Apple Intelligence is unavailable, LecCue still warms the ASR model and derives conservative terms from the course and school names.
+Course warmup also prepares Apple Translation so the first stable English clause can be translated without waiting for language-model setup. On macOS 26 or later, warmup uses the on-device Apple Foundation Model when available to propose likely English terminology. The suggestions remain editable before the class starts. When Apple Intelligence is unavailable, LingoSlate still warms the ASR model and derives conservative terms from the course and school names.
 
-After a session ends, LecCue stores a local summary beside the bilingual transcript. Apple Foundation Models produces a concise Chinese summary when available. The fallback remains useful without Apple Intelligence by extracting translated overview points, course terminology, repeated concepts, and timestamped assignment or deadline cues.
+After a session ends, LingoSlate stores a local summary beside the bilingual transcript. Apple Foundation Models produces a concise Chinese summary when available. The fallback remains useful without Apple Intelligence by extracting translated overview points, course terminology, repeated concepts, and timestamped assignment or deadline cues.
 
 ## Build
 
 ```bash
 DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift build --disable-sandbox
 DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift test --disable-sandbox
-DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift run --disable-sandbox ClassBridgeMac
+DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer swift run --disable-sandbox LingoSlateMac
 ```
 
 Build a foreground development app with microphone permission metadata and an ad-hoc signature:
 
 ```bash
 ./scripts/build-macos-app.sh
-open .build/LecCue.app
+open .build/LingoSlate.app
 ```
 
 MLX requires Xcode's optional Metal toolchain. Install it once before the first app build:
@@ -63,32 +63,34 @@ DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer \
   xcodebuild -downloadComponent MetalToolchain
 ```
 
-For development, `LECCUE_TRANSLATION_MODEL_PATH` may point at an already downloaded
-MLX model snapshot, and `LECCUE_MODEL_CACHE_PATH` can move future model downloads to
-an external disk.
+For development, `LINGOSLATE_TRANSLATION_MODEL_PATH` may point at an already downloaded
+MLX model snapshot, and `LINGOSLATE_MODEL_CACHE_PATH` can move future model downloads to
+an external disk. The former `LECCUE_TRANSLATION_MODEL_PATH` and `LECCUE_MODEL_CACHE_PATH`
+aliases remain readable during migration, but new configuration should use `LINGOSLATE_*`.
 
 A complete Xcode installation is required for App Store signing, ScreenCaptureKit, and device testing. The script produces a local development bundle, not a release archive.
 
 Run the local recognition adapter against a known audio file:
 
 ```bash
-swift run LecCueASRSmoke /path/to/english-audio.wav
+swift run LingoSlateASRSmoke /path/to/english-audio.wav
 ```
 
 ## Structure
 
 ```text
 Sources/
-  ClassBridgeCore/       Shared macOS/iOS domain and pipeline
-  ClassBridgeAudio/      Shared local capture and FluidAudio adapters
-  ClassBridgeTranslation/ Native MLX translation adapter
-  ClassBridgeMac/        Native macOS application
-  LecCueASRSmoke/        Local audio-file recognition smoke tool
-  LecCueBenchmark/       Private same-audio ASR benchmark
-  LecCueTranscriptBenchmark/ External Whisper transcript benchmark
-  LecCueTranslationBenchmark/ Private sampled translation benchmark
+  LingoSlateCore/        Shared macOS/iOS domain and pipeline
+  LingoSlateAudio/       Shared local capture and FluidAudio adapters
+  LingoSlateTranslation/ Native MLX translation adapter
+  LingoSlateMac/         Native macOS application
+  LingoSlateASRSmoke/    Local audio-file recognition smoke tool
+  LingoSlateBenchmark/   Private same-audio ASR benchmark
+  LingoSlateTranscriptBenchmark/ External Whisper transcript benchmark
+  LingoSlateTranslationBenchmark/ Private sampled translation benchmark
 Tests/
-  ClassBridgeCoreTests/  Shared core tests
+  LingoSlateCoreTests/   Shared core tests
+  LingoSlateMacTests/    macOS translation, summary, and UI adapter tests
 ```
 
 See [PRODUCT_DESIGN.md](PRODUCT_DESIGN.md) for product scope, architecture, quality targets, and roadmap.

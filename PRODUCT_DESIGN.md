@@ -1,10 +1,10 @@
-# ClassBridge Product Design
+# LingoSlate Product Design
 
-> Working name. A Mac-first bilingual lecture and meeting companion for international students.
+> Product name: LingoSlate. A Mac-first bilingual lecture and meeting companion for international students.
 
 ## 1. Product decision
 
-ClassBridge focuses on one complete workflow:
+LingoSlate focuses on one complete workflow:
 
 1. Select a course by name; materials and glossary are optional.
 2. Capture English speech from the microphone or Mac system audio.
