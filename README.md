@@ -24,13 +24,16 @@ This repository currently contains the first local microphone vertical slice:
   TranslateGemma 4B pass replaces it with a more natural classroom translation.
 - Phrase-level New Zealand academic terminology for ambiguous course language such as
   paper outlines, lab attendance, and tutorial priority.
+- Verbatim protection for course codes and institution-specific names, plus a quality gate
+  that keeps the Apple draft when a refined translation loses a number or protected term.
+- Automatic Traditional-to-Simplified Chinese normalization on local refined translations.
 - Non-blocking translation jobs so English subtitles remain responsive while Chinese is prepared.
 - Automatic post-class summaries using Apple Foundation Models with a deterministic local fallback.
 - Persisted overview, key concepts, timestamped tasks, and a summary/transcript review switcher.
 - Audio-input preflight that reports a missing microphone instead of crashing on headless Macs.
 - iPhone Continuity Camera microphone support through the selected macOS input device.
 - A native SwiftUI macOS workspace with live input level and real subtitle events.
-- Forty-six tests across the shared core, audio capture, translation, summary, and macOS UI adapters.
+- Fifty-three tests across the shared core, audio capture, translation, summary, and macOS UI adapters.
 
 Energy-saving mode downloads an approximately 120 MB model. High-accuracy mode progressively caches approximately 1.2 GB for its real-time and after-class encoders. Course warmup also downloads a pinned approximately 2.22 GB MLX TranslateGemma model for the second-stage translation pass. A one-hour 16 kHz mono session uses about 230 MB of temporary memory for the after-class pass. Audio, recognition, and translation remain on the Mac. Apple may ask the user to download the English and Simplified Chinese language package the first time translation is prepared. TranslateGemma is distributed under the [Gemma terms](https://ai.google.dev/gemma/terms) and is downloaded separately rather than bundled in LecCue.
 

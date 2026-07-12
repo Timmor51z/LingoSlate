@@ -111,9 +111,11 @@ number recall, protected-term recall, glossary-target recall, and every candidat
 only a regression diagnostic: valid Chinese translations can use different wording, and the
 LecSync Chinese text is not manually corrected. Human bilingual review remains the quality gate.
 
-The July 2026 24-segment production-length sample loaded TranslateGemma 4B in 3.44 seconds
-and translated with a 1.05-second median segment latency. It preserved every sampled numeric
-token. A phrase-level New Zealand academic glossary improved the local character diagnostic
-from 26.34% to 26.50% and improved the reviewed `paper outline`, lab-attendance, and tutorial-
-priority examples. Broad replacements such as `paper=课程` and `lab=实验课` were rejected
-because they damaged valid phrases such as `submit my paper` and `lab coat`.
+The July 2026 24-segment production-length sample loaded TranslateGemma 4B in 3.51 seconds
+and translated with a 1.02-second median segment latency. It preserved every sampled numeric
+token. Phrase-level New Zealand academic terminology, verbatim proper-noun placeholders, and
+Simplified Chinese normalization improved the local character diagnostic from 26.34% to 26.88%.
+Reviewed `paper outline`, lab-attendance, and tutorial-priority examples improved. Broad
+replacements such as `paper=课程` and `lab=实验课` were rejected because they damaged valid
+phrases such as `submit my paper` and `lab coat`. Production also rejects a refined result that
+loses a protected name or number, leaving the immediate Apple translation visible instead.

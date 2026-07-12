@@ -6,9 +6,9 @@ import XCTest
 final class AppleTranslationEngineTests: XCTestCase {
     func testTranslateGemmaInputUsesApprovedGlossaryAndProtectsRecognitionTerms() {
         let input = TranslateGemmaInputBuilder.make(
-            text: "Papers use Moodle; paperwork does not mean a paper.",
+            text: "Papers use MyWaikato and STEM; paperwork does not mean a paper.",
             context: TranslationContext(
-                course: Course(name: "Orientation", recognitionTerms: ["Moodle"]),
+                course: Course(name: "Orientation", recognitionTerms: ["STEM"]),
                 recentSourceText: [],
                 approvedTerms: [
                     GlossaryTerm(
@@ -18,11 +18,99 @@ final class AppleTranslationEngineTests: XCTestCase {
                         origin: .user,
                         isApproved: true
                     ),
+                    GlossaryTerm(
+                        source: "MyWaikato",
+                        target: "MyWaikato",
+                        origin: .officialCourseSource,
+                        isApproved: true
+                    ),
                 ]
             )
         )
 
-        XCTAssertEqual(input, "课程 use Moodle; paperwork does not mean a 课程.")
+        XCTAssertTrue(input.text.hasPrefix("课程 use "))
+        XCTAssertTrue(input.text.hasSuffix("; paperwork does not mean a 课程."))
+        XCTAssertEqual(Set(input.protectedTerms.values), ["MyWaikato", "STEM"])
+        XCTAssertFalse(input.text.contains("MyWaikato"))
+        XCTAssertFalse(input.text.contains("STEM"))
+    }
+
+    func testTranslateGemmaOutputRestoresTermsNumbersAndSimplifiedChinese() throws {
+        let translation = try TranslateGemmaOutputProcessor.process(
+            "我們在 LECCUEPROPER0 上查看 15 個課程。",
+            sourceText: "We review 15 papers in MyWaikato.",
+            preparedInput: TranslateGemmaPreparedInput(
+                text: "We review 15 papers in LECCUEPROPER0.",
+                protectedTerms: ["LECCUEPROPER0": "MyWaikato"]
+            )
+        )
+
+        XCTAssertEqual(translation, "我们在 MyWaikato 上查看 15 个课程。")
+    }
+
+    func testTranslateGemmaOutputRejectsMissingProtectedTerm() {
+        XCTAssertThrowsError(
+            try TranslateGemmaOutputProcessor.process(
+                "欢迎使用学生系统。",
+                sourceText: "Welcome to MyWaikato.",
+                preparedInput: TranslateGemmaPreparedInput(
+                    text: "Welcome to LECCUEPROPER0.",
+                    protectedTerms: ["LECCUEPROPER0": "MyWaikato"]
+                )
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? TranslateGemmaError,
+                .qualityRejected("专有名词缺失：MyWaikato")
+            )
+        }
+    }
+
+    func testTranslateGemmaOutputRejectsMissingNumber() {
+        XCTAssertThrowsError(
+            try TranslateGemmaOutputProcessor.process(
+                "每门课程都有学分。",
+                sourceText: "Each paper is worth 15 credits.",
+                preparedInput: TranslateGemmaPreparedInput(
+                    text: "Each paper is worth 15 credits.",
+                    protectedTerms: [:]
+                )
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? TranslateGemmaError,
+                .qualityRejected("数字信息缺失")
+            )
+        }
+    }
+
+    func testTranslateGemmaOutputAcceptsEquivalentChineseNumbers() throws {
+        let translation = try TranslateGemmaOutputProcessor.process(
+            "每门课程有十五学分，三门共四十五学分。",
+            sourceText: "Each paper is worth 15 credits, so three papers are worth 45.",
+            preparedInput: TranslateGemmaPreparedInput(
+                text: "Each paper is worth 15 credits, so three papers are worth 45.",
+                protectedTerms: [:]
+            )
+        )
+
+        XCTAssertEqual(translation, "每门课程有十五学分，三门共四十五学分。")
+    }
+
+    func testTranslateGemmaOutputRestoresOverlappingPlaceholderPrefixes() throws {
+        let translation = try TranslateGemmaOutputProcessor.process(
+            "LECCUEPROPER10 和 LECCUEPROPER1",
+            sourceText: "MyWaikato and STEM",
+            preparedInput: TranslateGemmaPreparedInput(
+                text: "LECCUEPROPER10 and LECCUEPROPER1",
+                protectedTerms: [
+                    "LECCUEPROPER1": "STEM",
+                    "LECCUEPROPER10": "MyWaikato",
+                ]
+            )
+        )
+
+        XCTAssertEqual(translation, "MyWaikato 和 STEM")
     }
 
     func testTranslateGemmaLocalModelSmokeWhenConfigured() async throws {
@@ -35,15 +123,30 @@ final class AppleTranslationEngineTests: XCTestCase {
         XCTAssertTrue(isReady)
 
         let translation = try await engine.translate(
-            "Welcome to the Division. This information is important for your success.",
+            "Welcome to STEM. Open My Way Kato. This information is important. Each paper is worth 15 credits.",
             context: TranslationContext(
-                course: Course(name: "STEAM College Orientation"),
-                recentSourceText: []
+                course: Course(
+                    name: "STEM College Orientation",
+                    recognitionTerms: ["STEM"]
+                ),
+                recentSourceText: [],
+                approvedTerms: [
+                    GlossaryTerm(
+                        source: "MyWaikato",
+                        target: "MyWaikato",
+                        aliases: ["My Way Kato"],
+                        origin: .officialCourseSource,
+                        isApproved: true
+                    ),
+                ]
             )
         )
 
         XCTAssertTrue(translation.contains("欢迎"), translation)
         XCTAssertTrue(translation.contains("重要"), translation)
+        XCTAssertTrue(translation.contains("STEM"), translation)
+        XCTAssertTrue(translation.contains("MyWaikato"), translation)
+        XCTAssertTrue(translation.contains("15"), translation)
     }
 
     @MainActor

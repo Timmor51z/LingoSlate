@@ -22,7 +22,10 @@ public actor SubtitlePipeline {
         self.translationEngine = translationEngine
         self.approvedTerms = approvedTerms.filter(\.isApproved)
         self.recentContextLimit = max(0, recentContextLimit)
-        self.termNormalizer = TranscriptTermNormalizer(course: course)
+        self.termNormalizer = TranscriptTermNormalizer(
+            course: course,
+            approvedTerms: self.approvedTerms
+        )
     }
 
     public func snapshots() -> AsyncStream<TranscriptSnapshot> {

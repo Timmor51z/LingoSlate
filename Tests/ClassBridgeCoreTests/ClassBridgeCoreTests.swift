@@ -11,6 +11,8 @@ final class ClassBridgeCoreTests: XCTestCase {
         XCTAssertTrue(terms.allSatisfy(\.isApproved))
         XCTAssertTrue(terms.contains { $0.source == "paper outline" && $0.target == "课程大纲" })
         XCTAssertTrue(terms.contains { $0.source == "attend the lab" && $0.target == "参加实验课" })
+        XCTAssertTrue(terms.contains { $0.source == "MyWaikato" && $0.target == "MyWaikato" })
+        XCTAssertTrue(terms.contains { $0.source == "Gate 1" && $0.aliases.contains("Gate One") })
         XCTAssertFalse(terms.contains { $0.source == "paper" || $0.source == "lab" })
         XCTAssertTrue(
             RegionalAcademicGlossary.approvedTerms(
@@ -342,6 +344,33 @@ final class ClassBridgeCoreTests: XCTestCase {
         )
     }
 
+    func testTranscriptTermNormalizerUsesApprovedAliases() {
+        let normalizer = TranscriptTermNormalizer(
+            course: Course(name: "Orientation"),
+            approvedTerms: [
+                GlossaryTerm(
+                    source: "MyWaikato",
+                    target: "MyWaikato",
+                    aliases: ["My Way Kato"],
+                    origin: .officialCourseSource,
+                    isApproved: true
+                ),
+                GlossaryTerm(
+                    source: "Gate 1",
+                    target: "Gate 1",
+                    aliases: ["Gate One"],
+                    origin: .officialCourseSource,
+                    isApproved: true
+                ),
+            ]
+        )
+
+        XCTAssertEqual(
+            normalizer.normalize("Open My Way Kato, then park at Gate One."),
+            "Open MyWaikato, then park at Gate 1."
+        )
+    }
+
     func testTranscriptTermNormalizerUsesCourseNameConservatively() {
         let normalizer = TranscriptTermNormalizer(
             course: Course(name: "Mobile Computing and Software Architecture")
@@ -537,6 +566,34 @@ final class ClassBridgeCoreTests: XCTestCase {
         XCTAssertEqual(
             snapshot.finalSegments.first?.translatedText,
             "精译：The event loop schedules callbacks."
+        )
+    }
+
+    func testPipelineKeepsPrimaryTranslationWhenRefinementFailsQualityCheck() async {
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Software Architecture"),
+            translationEngine: StagedTranslationEngine(
+                primary: TestTranslationEngine(),
+                refinement: FailingTranslationEngine()
+            )
+        )
+
+        await pipeline.consume(
+            .final(
+                id: UUID(),
+                text: "Each paper is worth 15 credits.",
+                startTime: 0,
+                endTime: 2,
+                speaker: nil,
+                provider: "test"
+            )
+        )
+        await pipeline.finishPendingTranslations()
+        let snapshot = await pipeline.currentSnapshot()
+
+        XCTAssertEqual(
+            snapshot.finalSegments.first?.translatedText,
+            "译文：Each paper is worth 15 credits."
         )
     }
 

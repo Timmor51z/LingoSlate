@@ -30,25 +30,56 @@ public struct TranscriptTermNormalizer: Sendable {
         )
     }
 
+    public init(course: Course, approvedTerms: [GlossaryTerm]) {
+        let preferred = (course.recognitionTerms ?? []).map {
+            (canonical: $0, match: $0, minimumSimilarity: 0.84)
+        }
+        let glossary = approvedTerms.filter(\.isApproved).flatMap { term in
+            [(canonical: term.source, match: term.source, minimumSimilarity: 0.84)]
+                + term.aliases.map {
+                    (canonical: term.source, match: $0, minimumSimilarity: 0.92)
+                }
+        }
+        let conservative = Self.courseNameTerms(course.name).map {
+            (canonical: $0, match: $0, minimumSimilarity: 0.92)
+        }
+        self.init(weightedTerms: preferred + glossary + conservative)
+    }
+
     public init(
         preferredTerms: [String],
         conservativeTerms: [String] = []
     ) {
+        let weightedTerms = preferredTerms.map {
+            (canonical: $0, match: $0, minimumSimilarity: 0.84)
+        } + conservativeTerms.map {
+            (canonical: $0, match: $0, minimumSimilarity: 0.92)
+        }
+        self.init(weightedTerms: weightedTerms)
+    }
+
+    private init(
+        weightedTerms: [(canonical: String, match: String, minimumSimilarity: Double)]
+    ) {
         var seen: Set<String> = []
         var prepared: [PreferredTerm] = []
 
-        let weightedTerms = preferredTerms.map { ($0, 0.84) }
-            + conservativeTerms.map { ($0, 0.92) }
-        for (rawTerm, minimumSimilarity) in weightedTerms {
-            let canonical = rawTerm.trimmingCharacters(in: .whitespacesAndNewlines)
-            let normalized = Self.normalizedTerm(canonical)
-            guard normalized.count >= 3, seen.insert(normalized).inserted else { continue }
+        for weightedTerm in weightedTerms {
+            let canonical = weightedTerm.canonical
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let match = weightedTerm.match
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalized = Self.normalizedTerm(match)
+            let deduplicationKey = "\(normalized)\u{0}\(canonical.lowercased())"
+            guard normalized.count >= 2,
+                  !canonical.isEmpty,
+                  seen.insert(deduplicationKey).inserted else { continue }
             prepared.append(
                 PreferredTerm(
                     canonical: canonical,
                     normalized: normalized,
-                    expectedWordCount: max(1, Self.words(in: canonical).count),
-                    minimumSimilarity: minimumSimilarity
+                    expectedWordCount: max(1, Self.words(in: match).count),
+                    minimumSimilarity: weightedTerm.minimumSimilarity
                 )
             )
         }

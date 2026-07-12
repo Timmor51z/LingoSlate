@@ -94,7 +94,7 @@ public enum RegionalAcademicGlossary {
     public static func approvedTerms(for profile: UserProfile) -> [GlossaryTerm] {
         guard profile.regionCode == "NZ" else { return [] }
 
-        return [
+        var terms = [
             term("paper code", "课程代码", aliases: ["paper codes"]),
             term("paper outline", "课程大纲", aliases: ["paper outlines"]),
             term("paper convener", "课程负责人", aliases: ["paper conveners"]),
@@ -103,6 +103,18 @@ public enum RegionalAcademicGlossary {
             term("attend the lab", "参加实验课", aliases: ["attending the lab"]),
             term("prioritize the tutorials", "优先参加辅导课"),
         ]
+        if profile.schoolName.localizedCaseInsensitiveContains("Waikato") {
+            terms.append(contentsOf: [
+                term("MyWaikato", "MyWaikato", aliases: ["My Way Kato", "My Waikato"]),
+                term("Waikato", "Waikato", aliases: ["Way Kato", "Wai Kato"]),
+                term("Moodle", "Moodle"),
+                term("Panopto", "Panopto", aliases: ["Panoptos"]),
+                term("FG Link", "FG Link"),
+                term("Gate 1", "Gate 1", aliases: ["Gate One", "K1"]),
+                term("Larkin Road", "Larkin Road", aliases: ["Larkin Rd"]),
+            ])
+        }
+        return terms
     }
 
     private static func term(
