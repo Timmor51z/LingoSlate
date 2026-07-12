@@ -50,11 +50,12 @@ public actor SubtitlePipeline {
             break
 
         case let .provisional(id, text, startTime, endTime, provider):
+            let normalizedText = termNormalizer.normalize(text)
             provisionalSegment = TranscriptSegment(
                 id: id,
                 startTime: startTime,
                 endTime: endTime,
-                sourceText: text,
+                sourceText: normalizedText,
                 state: .provisional,
                 provider: provider
             )

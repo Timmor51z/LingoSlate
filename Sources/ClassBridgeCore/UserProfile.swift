@@ -89,3 +89,34 @@ public enum CourseTermSeedBuilder {
         }
     }
 }
+
+public enum RegionalAcademicGlossary {
+    public static func approvedTerms(for profile: UserProfile) -> [GlossaryTerm] {
+        guard profile.regionCode == "NZ" else { return [] }
+
+        return [
+            term("paper code", "课程代码", aliases: ["paper codes"]),
+            term("paper outline", "课程大纲", aliases: ["paper outlines"]),
+            term("paper convener", "课程负责人", aliases: ["paper conveners"]),
+            term("tutorial stream", "辅导课班次", aliases: ["tutorial streams"]),
+            term("lab stream", "实验课班次", aliases: ["lab streams"]),
+            term("attend the lab", "参加实验课", aliases: ["attending the lab"]),
+            term("prioritize the tutorials", "优先参加辅导课"),
+        ]
+    }
+
+    private static func term(
+        _ source: String,
+        _ target: String,
+        aliases: [String] = []
+    ) -> GlossaryTerm {
+        GlossaryTerm(
+            source: source,
+            target: target,
+            aliases: aliases,
+            origin: .officialCourseSource,
+            confidence: 0.9,
+            isApproved: true
+        )
+    }
+}

@@ -12,9 +12,14 @@ let package = Package(
     products: [
         .library(name: "ClassBridgeCore", targets: ["ClassBridgeCore"]),
         .library(name: "ClassBridgeAudio", targets: ["ClassBridgeAudio"]),
+        .library(name: "ClassBridgeTranslation", targets: ["ClassBridgeTranslation"]),
         .executable(name: "ClassBridgeMac", targets: ["ClassBridgeMac"]),
         .executable(name: "LecCueASRSmoke", targets: ["LecCueASRSmoke"]),
         .executable(name: "LecCueBenchmark", targets: ["LecCueBenchmark"]),
+        .executable(
+            name: "LecCueTranslationBenchmark",
+            targets: ["LecCueTranslationBenchmark"]
+        ),
     ],
     dependencies: [
         .package(
@@ -43,16 +48,23 @@ let package = Package(
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ]
         ),
-        .executableTarget(
-            name: "ClassBridgeMac",
+        .target(
+            name: "ClassBridgeTranslation",
             dependencies: [
                 "ClassBridgeCore",
-                "ClassBridgeAudio",
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
+            ]
+        ),
+        .executableTarget(
+            name: "ClassBridgeMac",
+            dependencies: [
+                "ClassBridgeCore",
+                "ClassBridgeAudio",
+                "ClassBridgeTranslation",
             ]
         ),
         .executableTarget(
@@ -71,13 +83,24 @@ let package = Package(
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ]
         ),
+        .executableTarget(
+            name: "LecCueTranslationBenchmark",
+            dependencies: [
+                "ClassBridgeCore",
+                "ClassBridgeTranslation",
+            ]
+        ),
         .testTarget(
             name: "ClassBridgeCoreTests",
             dependencies: ["ClassBridgeCore", "ClassBridgeAudio"]
         ),
         .testTarget(
             name: "ClassBridgeMacTests",
-            dependencies: ["ClassBridgeMac", "ClassBridgeCore"]
+            dependencies: [
+                "ClassBridgeMac",
+                "ClassBridgeCore",
+                "ClassBridgeTranslation",
+            ]
         ),
     ]
 )

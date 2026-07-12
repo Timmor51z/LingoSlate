@@ -1,8 +1,30 @@
 import ClassBridgeCore
 import XCTest
+@testable import ClassBridgeTranslation
 @testable import ClassBridgeMac
 
 final class AppleTranslationEngineTests: XCTestCase {
+    func testTranslateGemmaInputUsesApprovedGlossaryAndProtectsRecognitionTerms() {
+        let input = TranslateGemmaInputBuilder.make(
+            text: "Papers use Moodle; paperwork does not mean a paper.",
+            context: TranslationContext(
+                course: Course(name: "Orientation", recognitionTerms: ["Moodle"]),
+                recentSourceText: [],
+                approvedTerms: [
+                    GlossaryTerm(
+                        source: "paper",
+                        target: "课程",
+                        aliases: ["papers"],
+                        origin: .user,
+                        isApproved: true
+                    ),
+                ]
+            )
+        )
+
+        XCTAssertEqual(input, "课程 use Moodle; paperwork does not mean a 课程.")
+    }
+
     func testTranslateGemmaLocalModelSmokeWhenConfigured() async throws {
         guard ProcessInfo.processInfo.environment["LECCUE_TRANSLATION_MODEL_PATH"] != nil else {
             throw XCTSkip("Set LECCUE_TRANSLATION_MODEL_PATH to run the local model smoke test")

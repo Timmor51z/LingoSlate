@@ -3,6 +3,22 @@ import XCTest
 @testable import ClassBridgeCore
 
 final class ClassBridgeCoreTests: XCTestCase {
+    func testNewZealandAcademicGlossaryUsesPhrasesWithoutAmbiguousSingleWords() {
+        let terms = RegionalAcademicGlossary.approvedTerms(
+            for: UserProfile(schoolName: "University of Waikato", regionCode: "NZ")
+        )
+
+        XCTAssertTrue(terms.allSatisfy(\.isApproved))
+        XCTAssertTrue(terms.contains { $0.source == "paper outline" && $0.target == "课程大纲" })
+        XCTAssertTrue(terms.contains { $0.source == "attend the lab" && $0.target == "参加实验课" })
+        XCTAssertFalse(terms.contains { $0.source == "paper" || $0.source == "lab" })
+        XCTAssertTrue(
+            RegionalAcademicGlossary.approvedTerms(
+                for: UserProfile(regionCode: "US")
+            ).isEmpty
+        )
+    }
+
     func testAdaptiveGainRaisesQuietSpeechWithoutClipping() {
         var processor = AdaptiveGainProcessor()
         let frame = AudioFrame(
@@ -421,6 +437,7 @@ final class ClassBridgeCoreTests: XCTestCase {
     }
 
     func testPipelineNormalizesPreferredCourseTermsBeforeTranslation() async {
+        let segmentID = UUID()
         let pipeline = SubtitlePipeline(
             course: Course(
                 name: "Software Architecture",
@@ -430,8 +447,23 @@ final class ClassBridgeCoreTests: XCTestCase {
         )
 
         await pipeline.consume(
+            .provisional(
+                id: segmentID,
+                text: "Open My Way Kato for the timetable.",
+                startTime: 0,
+                endTime: 1,
+                provider: "test"
+            )
+        )
+        var snapshot = await pipeline.currentSnapshot()
+        XCTAssertEqual(
+            snapshot.provisionalSegment?.sourceText,
+            "Open MyWaikato for the timetable."
+        )
+
+        await pipeline.consume(
             .final(
-                id: UUID(),
+                id: segmentID,
                 text: "Open My Way Kato for the timetable.",
                 startTime: 0,
                 endTime: 2,
@@ -440,7 +472,7 @@ final class ClassBridgeCoreTests: XCTestCase {
             )
         )
         await pipeline.finishPendingTranslations()
-        let snapshot = await pipeline.currentSnapshot()
+        snapshot = await pipeline.currentSnapshot()
 
         XCTAssertEqual(
             snapshot.finalSegments.first?.sourceText,

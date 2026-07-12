@@ -1,5 +1,6 @@
 import ClassBridgeAudio
 import ClassBridgeCore
+import ClassBridgeTranslation
 import Combine
 import Foundation
 
@@ -110,7 +111,10 @@ final class AppModel: ObservableObject {
             : translationEngine
         let pipeline = SubtitlePipeline(
             course: course,
-            translationEngine: sessionTranslationEngine
+            translationEngine: sessionTranslationEngine,
+            approvedTerms: RegionalAcademicGlossary.approvedTerms(
+                for: profileStore.profile
+            )
         )
         translationEngine.activate()
         let recognitionProfile: LocalRecognitionProfile = processingMode == .highAccuracy

@@ -72,6 +72,48 @@ This is format-normalized agreement with competitor output, not ground-truth WER
 
 Adaptive gain was also tested across the complete recording with the offline model. It worsened agreement from 15.75% to 16.71% and reduced throughput to 23.14x realtime, so high-accuracy mode intentionally keeps the raw 16 kHz signal. Adaptive gain remains limited to the 120M energy-saving path where it previously improved quiet-speech coverage.
 
+A July 12 repeat with the current dependency and evaluation code produced 18.34% at 6.74x
+realtime for Unified 1120 ms and 16.28% at 72.36x realtime for Unified offline. The roughly
+half-point movement does not change the product decision. The repeat also confirmed that the
+competitor transcript contains errors such as `STEAM` for spoken `STEM`, so these figures must
+remain agreement diagnostics rather than advertised WER.
+
 ## Ground truth
 
 LecSync and LecCue can both make the same mistake. For release-quality WER, manually correct a stratified 10-15 minute subset covering quiet speech, distant speech, accents, technical terms, numbers, and overlapping speakers. Keep that corrected reference private unless every speaker has consented to publication.
+
+## Translation sampling
+
+The translation benchmark uses LecSync English as input so it can measure translation
+separately from LecCue recognition errors. By default it samples 24 segments spread across
+the session and limits inputs to 6-36 words, matching LecCue's production translation chunks.
+
+```bash
+./scripts/build-mlx-metallib.sh
+
+DEVELOPER_DIR=/Volumes/Disk/Applications/Xcode.app/Contents/Developer \
+  swift build --disable-sandbox --product LecCueTranslationBenchmark
+
+cp .build/mlx-metal/mlx.metallib \
+  .build/arm64-apple-macosx/debug/mlx.metallib
+
+LECCUE_TRANSLATION_MODEL_PATH=/path/to/translategemma-snapshot \
+  .build/arm64-apple-macosx/debug/LecCueTranslationBenchmark \
+  --sample-count 24 \
+  --term Moodle \
+  --glossary "paper outline=课程大纲" \
+  Benchmarks/Private/<session-id>/reference.json \
+  BenchmarkResults/Private/<session-id>/translation-report.json
+```
+
+The report records model loading and per-segment latency, a local character n-gram F-score,
+number recall, protected-term recall, glossary-target recall, and every candidate/reference pair. Character overlap is
+only a regression diagnostic: valid Chinese translations can use different wording, and the
+LecSync Chinese text is not manually corrected. Human bilingual review remains the quality gate.
+
+The July 2026 24-segment production-length sample loaded TranslateGemma 4B in 3.44 seconds
+and translated with a 1.05-second median segment latency. It preserved every sampled numeric
+token. A phrase-level New Zealand academic glossary improved the local character diagnostic
+from 26.34% to 26.50% and improved the reviewed `paper outline`, lab-attendance, and tutorial-
+priority examples. Broad replacements such as `paper=课程` and `lab=实验课` were rejected
+because they damaged valid phrases such as `submit my paper` and `lab coat`.
