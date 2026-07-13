@@ -92,6 +92,37 @@ public enum AudioRetentionPolicy: String, Codable, CaseIterable, Sendable {
     case keep
 }
 
+public struct SessionPreparationDiagnostics: Codable, Hashable, Sendable {
+    public var preparedAt: Date
+    public var asrModelReady: Bool
+    public var quickTranslationReady: Bool
+    public var enhancedTranslationReady: Bool
+    public var usedFoundationModel: Bool
+    public var generatedTermCount: Int
+    public var terms: [String]
+    public var prewarmedRecognitionReused: Bool?
+
+    public init(
+        preparedAt: Date = Date(),
+        asrModelReady: Bool,
+        quickTranslationReady: Bool,
+        enhancedTranslationReady: Bool,
+        usedFoundationModel: Bool,
+        generatedTermCount: Int,
+        terms: [String],
+        prewarmedRecognitionReused: Bool? = nil
+    ) {
+        self.preparedAt = preparedAt
+        self.asrModelReady = asrModelReady
+        self.quickTranslationReady = quickTranslationReady
+        self.enhancedTranslationReady = enhancedTranslationReady
+        self.usedFoundationModel = usedFoundationModel
+        self.generatedTermCount = max(0, generatedTermCount)
+        self.terms = terms
+        self.prewarmedRecognitionReused = prewarmedRecognitionReused
+    }
+}
+
 public struct SessionConfiguration: Codable, Hashable, Sendable {
     public var course: Course
     public var kind: SessionKind
@@ -189,6 +220,7 @@ public struct SessionDocument: Codable, Hashable, Identifiable, Sendable {
     public var markers: [SessionMarker]
     public var summary: SessionSummary?
     public var audioFileName: String?
+    public var preparationDiagnostics: SessionPreparationDiagnostics?
 
     public init(
         id: UUID = UUID(),
@@ -198,7 +230,8 @@ public struct SessionDocument: Codable, Hashable, Identifiable, Sendable {
         segments: [TranscriptSegment] = [],
         markers: [SessionMarker] = [],
         summary: SessionSummary? = nil,
-        audioFileName: String? = nil
+        audioFileName: String? = nil,
+        preparationDiagnostics: SessionPreparationDiagnostics? = nil
     ) {
         self.id = id
         self.configuration = configuration
@@ -208,6 +241,7 @@ public struct SessionDocument: Codable, Hashable, Identifiable, Sendable {
         self.markers = markers
         self.summary = summary
         self.audioFileName = audioFileName?.nilIfBlank
+        self.preparationDiagnostics = preparationDiagnostics
     }
 }
 

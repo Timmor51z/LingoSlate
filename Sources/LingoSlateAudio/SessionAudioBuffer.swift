@@ -163,7 +163,7 @@ public actor SessionAudioBuffer {
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: sampleRate,
             AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 32_000,
+            AVEncoderBitRateKey: 48_000,
         ]
         audioFile = try AVAudioFile(
             forWriting: temporaryURL,

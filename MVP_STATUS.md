@@ -8,7 +8,7 @@
 - Validated session lifecycle transitions.
 - Provisional-to-final subtitle pipeline with translation context.
 - Atomic local JSON session persistence.
-- Local 16 kHz mono AAC M4A recording linked to each saved session, with playback and Finder access.
+- Local 16 kHz mono 48 kbps AAC M4A recording linked to each saved session, with playback and Finder access.
 - Bounded subtitle and microphone event streams, 10 Hz input metering, and disk-backed after-class audio replay for long-session stability.
 - Energy-saving recognition by default, sequential heavyweight model warmup, and explicit post-class translation progress.
 - Fifteen-minute TranslateGemma keep-warm window after high-accuracy sessions, with immediate MLX cache clearing when switching to energy-saving mode; downloaded weights remain cached.
@@ -35,12 +35,15 @@
 - Benchmark model/audio selectors for repeatable local A/B comparisons.
 - Local school and country or region profile settings.
 - Course-name warmup for terminology and real-time/post-class ASR models.
+- Persisted warmup diagnostics for ASR, quick translation, enhanced translation, generated terms, and actual recognition-engine reuse.
+- Conservative course-name typo repair plus academic, cloud, security, and software terminology preparation.
 - Apple Translation integration for on-device English-to-Simplified-Chinese subtitles.
 - Non-blocking translation jobs that keep English subtitles live during translation preparation.
 - Local post-class summary generation with Apple Foundation Models and a deterministic fallback.
 - Persisted overview, concepts, timestamped actions, and summary/full-transcript review views.
 - Missing-input-device preflight that prevents AVAudioEngine crashes on Macs without a microphone.
 - iPhone Continuity Camera microphone verified on a Mac mini at the app's 16 kHz capture rate.
+- Sustained low-input warning, misplaced currency-symbol repair, and clause-aware 36-word post-class translation chunks.
 
 ## Verification status
 
@@ -48,7 +51,7 @@
 - All Swift source files pass `swiftc -parse`.
 - Full package build and tests run with the external Xcode selected through `DEVELOPER_DIR`.
 - `swift test` builds the shared core, Mac executable, and test bundle successfully.
-- All 59 tests pass, with one optional local-model smoke test skipped when its model path is not configured. Coverage includes bounded snapshot delivery, adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio input preflight, M4A encoding, decoding, and chunked replay, optional course naming, approved terminology, brand migration, lifecycle transitions, non-blocking subtitle translation, Apple translation coordination, deterministic summaries, long-session sampling, summary rendering, and JSON persistence.
+- All 64 tests pass, with one optional local-model smoke test skipped when its model path is not configured. Coverage includes bounded snapshot delivery, adaptive gain and limiting, comparison metrics, revised streaming transcripts, audio input quality, M4A encoding, decoding, and chunked replay, optional course naming, approved terminology, warmup diagnostics, currency repair, clause-aware translation chunks, brand migration, lifecycle transitions, non-blocking subtitle translation, Apple translation coordination, deterministic summaries, long-session sampling, summary rendering, and JSON persistence.
 
 Set the external Xcode as the active developer directory once:
 
@@ -73,8 +76,8 @@ swift test
 
 ## Next production slice
 
-1. Add inverse text normalization for dates, times, and numbers.
-2. Add detailed model download progress and preflight readiness.
+1. Add inverse text normalization for dates, times, and broader spoken-number forms.
+2. Add per-span uncertainty signals and detailed model download progress.
 3. Run live subtitle, battery, thermal, and 90-minute soak tests.
 4. Add Markdown, text, SRT, and VTT bilingual export.
 

@@ -33,6 +33,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var isSummarizing = false
     @Published private(set) var isEnhancedTranslationReady = false
     @Published private(set) var savedAudioURL: URL?
+    @Published private(set) var warmupDiagnostics: SessionPreparationDiagnostics?
+    @Published private(set) var isInputLevelLow = false
 
     private let stateMachine = SessionStateMachine()
     private let sessionDirectoryURL: URL
@@ -60,6 +62,8 @@ final class AppModel: ObservableObject {
     private var enhancedModelReleaseTask: Task<Void, Never>?
     private var prewarmedEngine: (any SpeechRecognitionEngine)?
     private var prewarmedSignature: RecognitionWarmupSignature?
+    private var warmupDiagnosticsSignature: RecognitionWarmupSignature?
+    private var inputQualityMonitor = AudioInputQualityMonitor()
 
     init(profileStore: UserProfileStore = UserProfileStore()) {
         let sessionDirectoryURL = Self.sessionDirectory()
@@ -162,10 +166,21 @@ final class AppModel: ObservableObject {
         let recognitionProfile: LocalRecognitionProfile = processingMode == .highAccuracy
             ? .highAccuracy
             : .energySaver
-        let prewarmedEngine = takePrewarmedEngine(for: currentWarmupSignature)
+        let warmupSignature = currentWarmupSignature
+        let hasMatchingPrewarmedEngine = prewarmedEngine != nil
+            && prewarmedSignature == warmupSignature
+        var sessionPreparationDiagnostics = hasMatchingPrewarmedEngine
+            && warmupDiagnosticsSignature == warmupSignature
+            ? warmupDiagnostics
+            : nil
+        let prewarmedEngine = takePrewarmedEngine(for: warmupSignature)
         let engine = prewarmedEngine
             ?? LocalRecognitionEngineFactory.make(profile: recognitionProfile)
         let usesPrewarmedEngine = prewarmedEngine != nil
+        sessionPreparationDiagnostics?.prewarmedRecognitionReused = usesPrewarmedEngine
+        if sessionPreparationDiagnostics != nil {
+            warmupDiagnostics = sessionPreparationDiagnostics
+        }
         let capture = MicrophoneAudioCapture()
         let shouldRunPostClassOptimization = processingMode == .highAccuracy
         let audioBuffer = postClassAudioBuffer
@@ -173,7 +188,10 @@ final class AppModel: ObservableObject {
         self.pipeline = pipeline
         recognitionEngine = engine
         audioCapture = capture
-        let document = SessionDocument(configuration: configuration)
+        let document = SessionDocument(
+            configuration: configuration,
+            preparationDiagnostics: sessionPreparationDiagnostics
+        )
         currentDocument = document
         let audioURL = sessionDirectoryURL.appendingPathComponent(
             "\(document.id.uuidString).m4a"
@@ -185,6 +203,8 @@ final class AppModel: ObservableObject {
         savedAudioURL = nil
         startedAt = nil
         inputLevel = 0
+        isInputLevelLow = false
+        inputQualityMonitor.reset()
         captureSampleRate = nil
         statusMessage = "正在检查麦克风权限"
 
@@ -256,7 +276,7 @@ final class AppModel: ObservableObject {
                     throw MicrophoneCaptureError.permissionDenied
                 }
                 if usesPrewarmedEngine {
-                    self.statusMessage = "预热模型已就绪"
+                    self.statusMessage = "预热转写模型已复用"
                 } else {
                     self.statusMessage = self.processingMode == .highAccuracy
                         ? "正在加载高精度模型（首次约 595 MB）"
@@ -304,7 +324,8 @@ final class AppModel: ObservableObject {
         enhancedModelReleaseTask?.cancel()
         enhancedModelReleaseTask = nil
 
-        let preparedCourseName = courseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let preparedCourseName = CourseNameNormalizer.normalize(courseName)
+        courseName = preparedCourseName
         let preparedMode = processingMode
         let recognitionProfile: LocalRecognitionProfile = preparedMode == .highAccuracy
             ? .highAccuracy
@@ -316,6 +337,8 @@ final class AppModel: ObservableObject {
         )
 
         isWarmingUp = true
+        warmupDiagnostics = nil
+        warmupDiagnosticsSignature = nil
         statusMessage = "正在准备课程术语"
         warmupTask = Task { [weak self] in
             guard let self else { return }
@@ -369,8 +392,19 @@ final class AppModel: ObservableObject {
                 }
 
                 self.mergePreparedTerms(preparation.terms)
+                let actualTerms = self.parsedCourseTerms
+                let diagnostics = SessionPreparationDiagnostics(
+                    asrModelReady: true,
+                    quickTranslationReady: translationReady,
+                    enhancedTranslationReady: refinementReady,
+                    usedFoundationModel: preparation.usedFoundationModel,
+                    generatedTermCount: preparation.generatedTermCount,
+                    terms: actualTerms
+                )
                 self.prewarmedEngine = engine
                 self.prewarmedSignature = self.currentWarmupSignature
+                self.warmupDiagnostics = diagnostics
+                self.warmupDiagnosticsSignature = self.currentWarmupSignature
                 self.isWarmingUp = false
                 self.warmupTask = nil
                 self.coursePreparationTask = nil
@@ -383,11 +417,11 @@ final class AppModel: ObservableObject {
                 } else if preparedMode == .highAccuracy, !refinementReady {
                     self.statusMessage = "预热完成，本地精译未就绪，将使用快速翻译"
                 } else if preparedMode == .highAccuracy {
-                    self.statusMessage = "预热完成，高质量精译已就绪；课后模型按需加载"
+                    self.statusMessage = "预热完成，转写与高质量精译已就绪，术语 \(actualTerms.count) 个"
                 } else if preparation.usedFoundationModel {
-                    self.statusMessage = "预热完成，候选术语已生成"
+                    self.statusMessage = "预热完成，候选术语 \(actualTerms.count) 个"
                 } else {
-                    self.statusMessage = "预热完成，学校与课程术语已准备"
+                    self.statusMessage = "预热完成，课程术语 \(actualTerms.count) 个"
                 }
             } catch is CancellationError {
                 preparationTask.cancel()
@@ -473,9 +507,13 @@ final class AppModel: ObservableObject {
         summary = nil
         isSummarizing = false
         savedAudioURL = nil
+        warmupDiagnostics = nil
+        warmupDiagnosticsSignature = nil
         markers = []
         startedAt = nil
         inputLevel = 0
+        isInputLevelLow = false
+        inputQualityMonitor.reset()
         captureSampleRate = nil
         statusMessage = "就绪"
 
@@ -542,10 +580,16 @@ final class AppModel: ObservableObject {
 
     private func receiveInputLevel(_ level: Float) {
         inputLevel = level
+        isInputLevelLow = inputQualityMonitor.record(
+            level: level,
+            at: ProcessInfo.processInfo.systemUptime
+        )
     }
 
     private func receiveCaptureStopped() {
         inputLevel = 0
+        isInputLevelLow = false
+        inputQualityMonitor.reset()
     }
 
     private func markFailed(_ message: String) async {
@@ -557,6 +601,8 @@ final class AppModel: ObservableObject {
         }
         lifecycleState = await stateMachine.currentState()
         inputLevel = 0
+        isInputLevelLow = false
+        inputQualityMonitor.reset()
         isSummarizing = false
         statusMessage = message
     }
@@ -647,6 +693,8 @@ final class AppModel: ObservableObject {
         }
         lifecycleState = await stateMachine.currentState()
         inputLevel = 0
+        isInputLevelLow = false
+        inputQualityMonitor.reset()
         statusMessage = "已取消"
     }
 
@@ -675,6 +723,8 @@ final class AppModel: ObservableObject {
             let staleEngine = prewarmedEngine
             prewarmedEngine = nil
             prewarmedSignature = nil
+            warmupDiagnostics = nil
+            warmupDiagnosticsSignature = nil
             if let staleEngine {
                 Task { try? await staleEngine.finalize() }
             }
@@ -691,6 +741,8 @@ final class AppModel: ObservableObject {
         let engine = prewarmedEngine
         prewarmedEngine = nil
         prewarmedSignature = nil
+        warmupDiagnostics = nil
+        warmupDiagnosticsSignature = nil
         try? await engine?.finalize()
     }
 
@@ -768,7 +820,7 @@ final class AppModel: ObservableObject {
                     with: transcript,
                     duration: duration,
                     provider: offlineProfile.providerIdentifier,
-                    maximumWordsPerSegment: 60,
+                    maximumWordsPerSegment: 36,
                     progress: { [weak self] completed, total in
                         Task { @MainActor [weak self] in
                             guard total > 0 else { return }

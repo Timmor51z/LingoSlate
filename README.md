@@ -17,15 +17,17 @@ This repository currently contains the first local microphone vertical slice:
 - FluidAudio Parakeet EOU 120M energy-saving recognition with adaptive gain and limiting.
 - FluidAudio Parakeet Unified 0.6B high-accuracy streaming recognition at 1120 ms context.
 - An automatic full-context offline transcription pass before high-accuracy sessions are saved.
-- Streaming AAC M4A session recording that is linked to the bilingual transcript without retaining the full class in memory.
-- Conservative course-name and optional term normalization for proper nouns and technical vocabulary.
+- Streaming 48 kbps AAC M4A session recording that is linked to the bilingual transcript without retaining the full class in memory.
+- Conservative course-name spelling repair, title phrase extraction, and domain term packs for proper nouns and technical vocabulary.
 - Local user profile settings for school and country or region.
-- Course warmup that prepares editable terms and preloads the selected real-time model.
+- Course warmup that prepares editable terms, preloads transcription and translation models, and persists whether the warmed recognition engine was reused.
 - On-device English-to-Simplified-Chinese translation through Apple Translation.
 - Two-stage high-accuracy translation: Apple Translation appears first, then a local
   TranslateGemma 4B pass replaces it with a more natural classroom translation.
 - Phrase-level New Zealand academic terminology for ambiguous course language such as
   paper outlines, lab attendance, and tutorial priority.
+- Global academic aliases for Overleaf, IEEE, ACM, Scopus, citations, peer evaluation,
+  and mark deductions so spoken variants can be repaired before translation.
 - Verbatim protection for course codes and institution-specific names, plus a quality gate
   that keeps the Apple draft when a refined translation loses a number or protected term.
 - Automatic Traditional-to-Simplified Chinese normalization on local refined translations.
@@ -35,11 +37,12 @@ This repository currently contains the first local microphone vertical slice:
 - Audio-input preflight that reports a missing microphone instead of crashing on headless Macs.
 - iPhone Continuity Camera microphone support through the selected macOS input device.
 - A native SwiftUI macOS workspace with live input level and real subtitle events.
-- Fifty-nine tests across the shared core, audio capture, translation, summary, migration, persistence, and macOS UI adapters.
+- Sustained low-input warnings and clause-aware 36-word post-class translation chunks.
+- Sixty-four tests across the shared core, audio capture, translation, summary, migration, persistence, and macOS UI adapters.
 
 Energy-saving mode is the default and downloads an approximately 120 MB model. High-accuracy mode progressively caches approximately 1.2 GB for its real-time and after-class encoders. Course warmup also downloads a pinned approximately 2.22 GB MLX TranslateGemma model for the second-stage translation pass. Audio streams to disk in bounded chunks, and the after-class pass reads it back in 16,000-sample chunks instead of keeping a full class in memory. UI snapshots retain only the latest pending value, microphone-level updates are capped at 10 Hz, and heavyweight high-accuracy models prepare sequentially. The TranslateGemma container stays warm for 15 minutes after a high-accuracy session, then its MLX buffer cache is released; switching to energy-saving mode releases it immediately, while downloaded weights remain on disk. Audio, recognition, and translation remain on the Mac. Apple may ask the user to download the English and Simplified Chinese language package the first time translation is prepared. TranslateGemma is distributed under the [Gemma terms](https://ai.google.dev/gemma/terms) and is downloaded separately rather than bundled in LingoSlate.
 
-Course warmup also prepares Apple Translation so the first stable English clause can be translated without waiting for language-model setup. On macOS 26 or later, warmup uses the on-device Apple Foundation Model when available to propose likely English terminology. The suggestions remain editable before the class starts. When Apple Intelligence is unavailable, LingoSlate still warms the ASR model and derives conservative terms from the course and school names.
+Course warmup also prepares Apple Translation so the first stable English clause can be translated without waiting for language-model setup. On macOS 26 or later, warmup uses the on-device Apple Foundation Model when available to propose likely English terminology. The suggestions remain editable before the class starts. When Apple Intelligence is unavailable, LingoSlate still warms the ASR model and derives conservative terms from the course and school names. The workspace shows the prepared term count, and the saved session records model readiness, generated terms, and whether the prewarmed recognition engine was actually reused.
 
 After a session ends, LingoSlate stores a local summary beside the bilingual transcript. Apple Foundation Models produces a concise Chinese summary when available. The fallback remains useful without Apple Intelligence by extracting translated overview points, course terminology, repeated concepts, and timestamped assignment or deadline cues.
 
@@ -52,7 +55,7 @@ Completed sessions are stored as JSON under
 `~/Library/Application Support/LingoSlate/Sessions/`. Each file contains session settings,
 timestamps, final English transcript segments, available Chinese translations, markers, and the
 post-class summary. The original microphone audio is saved beside the JSON as a 16 kHz mono,
-32 kbps AAC M4A file with the same session UUID, typically using about 15 MB per hour. The JSON
+48 kbps AAC M4A file with the same session UUID, typically using about 22 MB per hour. The JSON
 stores the matching audio filename, and the completed-session view can play or reveal it in
 Finder. Audio remains on the Mac and is written incrementally so long classes do not accumulate
 raw Float32 frames in memory. High-accuracy replay reads the saved file in bounded chunks.

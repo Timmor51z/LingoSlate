@@ -20,6 +20,12 @@ public struct TranscriptTermNormalizer: Sendable {
     private static let wordExpression = try! NSRegularExpression(
         pattern: #"[\p{L}\p{N}]+"#
     )
+    private static let embeddedCurrencyExpression = try! NSRegularExpression(
+        pattern: #"(?<![\p{L}\p{N}$])([0-9])\s*\$\s*(0|,[0-9]{3}(?:,[0-9]{3})*)(?![\p{L}\p{N}])"#
+    )
+    private static let suffixCurrencyExpression = try! NSRegularExpression(
+        pattern: #"(?<![\p{L}\p{N}$])([0-9][0-9,]*(?:\.[0-9]+)?)\s+\$(?![\p{L}\p{N}])"#
+    )
 
     private let terms: [PreferredTerm]
 
@@ -90,11 +96,43 @@ public struct TranscriptTermNormalizer: Sendable {
     }
 
     public func normalize(_ text: String) -> String {
-        var result = text
+        var result = Self.repairCurrencySymbols(in: text)
         for term in terms {
             result = replacingMatches(for: term, in: result)
         }
         return result
+    }
+
+    private static func repairCurrencySymbols(in text: String) -> String {
+        var result = replacingCurrencyMatches(
+            expression: embeddedCurrencyExpression,
+            in: text,
+            joinsCapturedGroups: true
+        )
+        result = replacingCurrencyMatches(
+            expression: suffixCurrencyExpression,
+            in: result,
+            joinsCapturedGroups: false
+        )
+        return result
+    }
+
+    private static func replacingCurrencyMatches(
+        expression: NSRegularExpression,
+        in text: String,
+        joinsCapturedGroups: Bool
+    ) -> String {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        let matches = expression.matches(in: text, range: range)
+        guard !matches.isEmpty else { return text }
+
+        let mutable = NSMutableString(string: text)
+        for match in matches.reversed() {
+            let first = mutable.substring(with: match.range(at: 1))
+            let second = joinsCapturedGroups ? mutable.substring(with: match.range(at: 2)) : ""
+            mutable.replaceCharacters(in: match.range, with: "$\(first)\(second)")
+        }
+        return mutable as String
     }
 
     private func replacingMatches(

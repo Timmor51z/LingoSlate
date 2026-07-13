@@ -18,6 +18,7 @@ private struct GeneratedCourseVocabulary {
 struct CoursePreparationResult: Sendable {
     var terms: [String]
     var usedFoundationModel: Bool
+    var generatedTermCount: Int
 }
 
 struct CoursePreparationService: Sendable {
@@ -25,7 +26,7 @@ struct CoursePreparationService: Sendable {
         courseName: String,
         profile: UserProfile
     ) async -> CoursePreparationResult {
-        let courseName = courseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let courseName = CourseNameNormalizer.normalize(courseName)
         let seedTerms = CourseTermSeedBuilder.suggestions(
             courseName: courseName,
             schoolName: profile.schoolName
@@ -33,7 +34,8 @@ struct CoursePreparationService: Sendable {
         guard !courseName.isEmpty else {
             return CoursePreparationResult(
                 terms: seedTerms,
-                usedFoundationModel: false
+                usedFoundationModel: false,
+                generatedTermCount: 0
             )
         }
 
@@ -44,9 +46,11 @@ struct CoursePreparationService: Sendable {
                     courseName: courseName,
                     profile: profile
                 )
+                let preparedGeneratedTerms = Self.merge(generatedTerms)
                 return CoursePreparationResult(
-                    terms: Self.merge(seedTerms, generatedTerms),
-                    usedFoundationModel: true
+                    terms: Self.merge(seedTerms, preparedGeneratedTerms),
+                    usedFoundationModel: !preparedGeneratedTerms.isEmpty,
+                    generatedTermCount: preparedGeneratedTerms.count
                 )
             } catch {
                 // Deterministic seed terms keep warmup useful when generation fails.
@@ -56,7 +60,8 @@ struct CoursePreparationService: Sendable {
 
         return CoursePreparationResult(
             terms: seedTerms,
-            usedFoundationModel: false
+            usedFoundationModel: false,
+            generatedTermCount: 0
         )
     }
 

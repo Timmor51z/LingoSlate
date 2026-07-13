@@ -345,8 +345,21 @@ public actor SubtitlePipeline {
         }
 
         for sentence in sentences {
-            let words = sentence.split(whereSeparator: \.isWhitespace)
-            if words.count > maximumWordsPerSegment {
+            let units = wordCount(sentence) > maximumWordsPerSegment
+                ? clauseChunks(sentence)
+                : [sentence]
+            for unit in units {
+                let words = unit.split(whereSeparator: \.isWhitespace)
+                guard !words.isEmpty else { continue }
+                if words.count <= maximumWordsPerSegment {
+                    if currentWordCount + words.count > maximumWordsPerSegment {
+                        flushCurrentChunk()
+                    }
+                    currentSentences.append(unit)
+                    currentWordCount += words.count
+                    continue
+                }
+
                 flushCurrentChunk()
                 var start = words.startIndex
                 while start < words.endIndex {
@@ -358,16 +371,31 @@ public actor SubtitlePipeline {
                     chunks.append(words[start..<end].joined(separator: " "))
                     start = end
                 }
-            } else {
-                if currentWordCount + words.count > maximumWordsPerSegment {
-                    flushCurrentChunk()
-                }
-                currentSentences.append(sentence)
-                currentWordCount += words.count
             }
         }
         flushCurrentChunk()
         return chunks
+    }
+
+    private static func clauseChunks(_ sentence: String) -> [String] {
+        let delimiters: Set<Character> = [",", ";", ":", "—", "–"]
+        var chunks: [String] = []
+        var start = sentence.startIndex
+        for index in sentence.indices where delimiters.contains(sentence[index]) {
+            let end = sentence.index(after: index)
+            let chunk = sentence[start..<end].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !chunk.isEmpty {
+                chunks.append(chunk)
+            }
+            start = end
+        }
+        if start < sentence.endIndex {
+            let chunk = sentence[start...].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !chunk.isEmpty {
+                chunks.append(chunk)
+            }
+        }
+        return chunks.isEmpty ? [sentence] : chunks
     }
 
     private static func wordCount(_ text: String) -> Int {

@@ -69,6 +69,13 @@ struct ClassroomWorkspaceView: View {
                 .textFieldStyle(.plain)
                 .focused($focusedField, equals: .courseTerms)
                 .disabled(model.isActive || model.isWarmingUp)
+
+            if let diagnostics = model.warmupDiagnostics,
+               model.isCourseWarm || diagnostics.prewarmedRecognitionReused == true {
+                Label("\(diagnostics.terms.count) 个术语", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .help(warmupDetails(diagnostics))
+            }
         }
         .font(.callout)
         .padding(.horizontal, 18)
@@ -175,6 +182,12 @@ struct ClassroomWorkspaceView: View {
                     Text("\(Int(sampleRate / 1_000)) kHz")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.tertiary)
+                }
+
+                if model.isInputLevelLow {
+                    Label("收音偏弱", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .help("连续收音偏弱，建议将 Mac 或 iPhone 麦克风靠近讲者")
                 }
             }
 
@@ -395,6 +408,24 @@ struct ClassroomWorkspaceView: View {
     private func durationText(_ duration: TimeInterval) -> String {
         let seconds = max(0, Int(duration))
         return String(format: "%02d:%02d:%02d", seconds / 3_600, seconds / 60 % 60, seconds % 60)
+    }
+
+    private func warmupDetails(_ diagnostics: SessionPreparationDiagnostics) -> String {
+        let asr = diagnostics.asrModelReady ? "已就绪" : "未就绪"
+        let quickTranslation = diagnostics.quickTranslationReady ? "已就绪" : "未就绪"
+        let enhancedTranslation = diagnostics.enhancedTranslationReady ? "已就绪" : "未就绪"
+        let reuse: String
+        switch diagnostics.prewarmedRecognitionReused {
+        case true:
+            reuse = "已复用"
+        case false:
+            reuse = "未复用"
+        case nil:
+            reuse = "等待开课验证"
+        }
+        return "转写：\(asr)\n快速翻译：\(quickTranslation)\n高质量精译：\(enhancedTranslation)\n"
+            + "生成术语：\(diagnostics.generatedTermCount) 个\n预热引擎：\(reuse)\n\n"
+            + diagnostics.terms.joined(separator: ", ")
     }
 }
 

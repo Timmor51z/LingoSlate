@@ -14,12 +14,14 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertTrue(terms.contains { $0.source == "attend the lab" && $0.target == "参加实验课" })
         XCTAssertTrue(terms.contains { $0.source == "MyWaikato" && $0.target == "MyWaikato" })
         XCTAssertTrue(terms.contains { $0.source == "Gate 1" && $0.aliases.contains("Gate One") })
+        XCTAssertTrue(terms.contains { $0.source == "IEEE" && $0.aliases.contains("I triple E") })
+        XCTAssertTrue(terms.contains { $0.source == "deduction of marks" && $0.target == "扣分" })
         XCTAssertFalse(terms.contains { $0.source == "paper" || $0.source == "lab" })
-        XCTAssertTrue(
-            RegionalAcademicGlossary.approvedTerms(
-                for: UserProfile(regionCode: "US")
-            ).isEmpty
+        let globalTerms = RegionalAcademicGlossary.approvedTerms(
+            for: UserProfile(regionCode: "US")
         )
+        XCTAssertTrue(globalTerms.contains { $0.source == "Overleaf" })
+        XCTAssertFalse(globalTerms.contains { $0.source == "paper outline" })
     }
 
     func testAdaptiveGainRaisesQuietSpeechWithoutClipping() {
@@ -419,13 +421,35 @@ final class LingoSlateCoreTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            terms,
+            Array(terms.prefix(4)),
             [
                 "University of Waikato",
+                "Mobile Computing and Software Architecture",
                 "Mobile Computing",
                 "Software Architecture",
             ]
         )
+        XCTAssertTrue(terms.contains("Google Scholar"))
+        XCTAssertTrue(terms.contains("in-text citation"))
+        XCTAssertTrue(terms.contains { $0.caseInsensitiveCompare("software architecture") == .orderedSame })
+        XCTAssertTrue(terms.contains("GitHub"))
+    }
+
+    func testCourseNameNormalizerRepairsHighConfidenceTyposAndSeedsDomainTerms() {
+        let normalized = CourseNameNormalizer.normalize(
+            "Secure Cloud Aplication Enginerring"
+        )
+        let terms = CourseTermSeedBuilder.suggestions(
+            courseName: normalized,
+            schoolName: "University of Waikato"
+        )
+
+        XCTAssertEqual(normalized, "Secure Cloud Application Engineering")
+        XCTAssertTrue(terms.contains("Secure Cloud Application Engineering"))
+        XCTAssertTrue(terms.contains("Cloud Application"))
+        XCTAssertTrue(terms.contains("AWS"))
+        XCTAssertTrue(terms.contains("OWASP"))
+        XCTAssertTrue(terms.contains("REST API"))
     }
 
     func testCourseDecodesLegacyDataWithoutRecognitionTerms() throws {
@@ -461,6 +485,35 @@ final class LingoSlateCoreTests: XCTestCase {
         )
     }
 
+    func testTranscriptTermNormalizerRepairsMisplacedCurrencySymbols() {
+        let normalizer = TranscriptTermNormalizer(preferredTerms: [])
+
+        XCTAssertEqual(
+            normalizer.normalize(
+                "Fees range from 6$0 to 7$0 and the scholarship is 8$,000. Pay 60 $ today."
+            ),
+            "Fees range from $60 to $70 and the scholarship is $8,000. Pay $60 today."
+        )
+    }
+
+    func testAudioInputQualityMonitorRequiresSustainedStrongInput() {
+        var monitor = AudioInputQualityMonitor(
+            observationDuration: 15,
+            strongLevelThreshold: 0.32,
+            minimumStrongSamples: 8
+        )
+
+        for second in 0...15 {
+            _ = monitor.record(level: second == 4 ? 0.8 : 0.1, at: Double(second))
+        }
+        XCTAssertTrue(monitor.isInputLow)
+
+        for second in 16...30 {
+            _ = monitor.record(level: 0.5, at: Double(second))
+        }
+        XCTAssertFalse(monitor.isInputLow)
+    }
+
     func testTranscriptTermNormalizerUsesApprovedAliases() {
         let normalizer = TranscriptTermNormalizer(
             course: Course(name: "Orientation"),
@@ -485,6 +538,20 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertEqual(
             normalizer.normalize("Open My Way Kato, then park at Gate One."),
             "Open MyWaikato, then park at Gate 1."
+        )
+    }
+
+    func testAcademicGlossaryRepairsSpokenAcronymAliases() {
+        let normalizer = TranscriptTermNormalizer(
+            course: Course(name: "Research Methods"),
+            approvedTerms: RegionalAcademicGlossary.approvedTerms(
+                for: UserProfile(regionCode: "NZ")
+            )
+        )
+
+        XCTAssertEqual(
+            normalizer.normalize("Use Over leaf and submit to I triple E."),
+            "Use Overleaf and submit to IEEE."
         )
     }
 
@@ -804,6 +871,32 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertTrue(snapshot.finalSegments.allSatisfy { $0.state == .translated })
     }
 
+    func testPipelineSplitsLongOfflineSentenceAtClauseBoundaries() async {
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Writing"),
+            translationEngine: TestTranslationEngine()
+        )
+
+        let replaced = await pipeline.replaceFinalTranscript(
+            with: "One two three four five six, seven eight nine ten eleven twelve; "
+                + "thirteen fourteen fifteen sixteen seventeen eighteen.",
+            duration: 18,
+            provider: "offline",
+            maximumWordsPerSegment: 8
+        )
+        let snapshot = await pipeline.currentSnapshot()
+
+        XCTAssertTrue(replaced)
+        XCTAssertEqual(snapshot.finalSegments.count, 3)
+        XCTAssertTrue(snapshot.finalSegments[0].sourceText.hasSuffix(","))
+        XCTAssertTrue(snapshot.finalSegments[1].sourceText.hasSuffix(";"))
+        XCTAssertTrue(
+            snapshot.finalSegments.allSatisfy {
+                $0.sourceText.split(whereSeparator: \.isWhitespace).count <= 8
+            }
+        )
+    }
+
     func testDeterministicSummaryUsesTranslationsTermsAndActionCues() async throws {
         let document = SessionDocument(
             configuration: SessionConfiguration(
@@ -907,7 +1000,16 @@ final class LingoSlateCoreTests: XCTestCase {
                 keyConcepts: ["Atomicity"],
                 actionItems: []
             ),
-            audioFileName: "session.m4a"
+            audioFileName: "session.m4a",
+            preparationDiagnostics: SessionPreparationDiagnostics(
+                asrModelReady: true,
+                quickTranslationReady: true,
+                enhancedTranslationReady: true,
+                usedFoundationModel: false,
+                generatedTermCount: 0,
+                terms: ["Transactions"],
+                prewarmedRecognitionReused: true
+            )
         )
 
         try await store.save(document)
@@ -923,6 +1025,23 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertEqual(loaded.audioFileName, "session.m4a")
         XCTAssertEqual(loaded.markers, document.markers)
         XCTAssertEqual(loaded.summary, document.summary)
+        let loadedPreparation = try XCTUnwrap(loaded.preparationDiagnostics)
+        let expectedPreparation = try XCTUnwrap(document.preparationDiagnostics)
+        XCTAssertEqual(loadedPreparation.asrModelReady, expectedPreparation.asrModelReady)
+        XCTAssertEqual(loadedPreparation.quickTranslationReady, expectedPreparation.quickTranslationReady)
+        XCTAssertEqual(loadedPreparation.enhancedTranslationReady, expectedPreparation.enhancedTranslationReady)
+        XCTAssertEqual(loadedPreparation.usedFoundationModel, expectedPreparation.usedFoundationModel)
+        XCTAssertEqual(loadedPreparation.generatedTermCount, expectedPreparation.generatedTermCount)
+        XCTAssertEqual(loadedPreparation.terms, expectedPreparation.terms)
+        XCTAssertEqual(
+            loadedPreparation.prewarmedRecognitionReused,
+            expectedPreparation.prewarmedRecognitionReused
+        )
+        XCTAssertEqual(
+            loadedPreparation.preparedAt.timeIntervalSince1970,
+            expectedPreparation.preparedAt.timeIntervalSince1970,
+            accuracy: 0.001
+        )
         XCTAssertEqual(
             loaded.startedAt.timeIntervalSince1970,
             document.startedAt.timeIntervalSince1970,
