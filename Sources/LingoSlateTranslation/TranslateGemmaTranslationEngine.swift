@@ -94,10 +94,7 @@ public actor TranslateGemmaTranslationEngine: TranslationEngine {
             )
         )
         let response = try await session.respond(
-            to: """
-            <<<source>>>English<<<target>>>Simplified Chinese<<<text>>>
-            \(preparedInput.text)
-            """
+            to: TranslateGemmaPromptBuilder.make(preparedInput)
         )
         return try TranslateGemmaOutputProcessor.process(
             response,
@@ -107,8 +104,11 @@ public actor TranslateGemmaTranslationEngine: TranslationEngine {
     }
 
     public func release() {
+        let wasLoaded = modelContainer != nil
         modelContainer = nil
-        Memory.clearCache()
+        if wasLoaded {
+            Memory.clearCache()
+        }
         state = .idle
     }
 
@@ -174,6 +174,20 @@ public actor TranslateGemmaTranslationEngine: TranslationEngine {
 struct TranslateGemmaPreparedInput: Equatable {
     var text: String
     var protectedTerms: [String: String]
+    var courseContext: String?
+    var recentContext: [String]
+
+    init(
+        text: String,
+        protectedTerms: [String: String],
+        courseContext: String? = nil,
+        recentContext: [String] = []
+    ) {
+        self.text = text
+        self.protectedTerms = protectedTerms
+        self.courseContext = courseContext
+        self.recentContext = recentContext
+    }
 }
 
 enum TranslateGemmaInputBuilder {
@@ -185,17 +199,42 @@ enum TranslateGemmaInputBuilder {
 
     static func make(text: String, context: TranslationContext) -> TranslateGemmaPreparedInput {
         var terms: [ReplacementTerm] = []
+        let approvedSources = Set(
+            context.approvedTerms.flatMap { [$0.source] + $0.aliases }
+                .map { $0.lowercased() }
+        )
+        if !approvedSources.contains("paper"),
+           treatsPaperAsCourse(text: text, context: context) {
+            terms.append(
+                contentsOf: ["paper", "papers"].map {
+                    ReplacementTerm(
+                        source: $0,
+                        target: "课程",
+                        protectsVerbatim: false
+                    )
+                }
+            )
+        }
+        if !approvedSources.contains("playground"),
+           hasSoftwareContext(text: text, context: context) {
+            terms.append(
+                ReplacementTerm(
+                    source: "playground",
+                    target: "Playground",
+                    protectsVerbatim: true
+                )
+            )
+        }
         for approved in context.approvedTerms {
             let target = approved.target.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !target.isEmpty else { continue }
-            let protectsVerbatim = normalized(approved.source) == normalized(target)
             terms.append(contentsOf: ([approved.source] + approved.aliases).compactMap { source in
                 let source = source.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !source.isEmpty else { return nil }
                 return ReplacementTerm(
                     source: source,
                     target: target,
-                    protectsVerbatim: protectsVerbatim
+                    protectsVerbatim: true
                 )
             })
         }
@@ -231,7 +270,73 @@ enum TranslateGemmaInputBuilder {
                 protectedTerms[replacement] = nil
             }
         }
-        return TranslateGemmaPreparedInput(text: result, protectedTerms: protectedTerms)
+        let courseContext = [
+            context.course.name,
+            context.course.code,
+            context.course.domain,
+            context.course.roughDescription,
+            context.course.lecturerNames.first,
+            context.course.lecturerAccent?.displayName,
+        ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+        .joined(separator: " | ")
+        let recentContext = context.phase != .live
+            ? context.recentSourceText.suffix(4).compactMap(cleanContext)
+            : []
+        return TranslateGemmaPreparedInput(
+            text: result,
+            protectedTerms: protectedTerms,
+            courseContext: context.phase != .live && !courseContext.isEmpty
+                ? courseContext
+                : nil,
+            recentContext: recentContext
+        )
+    }
+
+    private static func cleanContext(_ text: String) -> String? {
+        let text = text
+            .replacingOccurrences(of: "<<<", with: "")
+            .replacingOccurrences(of: ">>>", with: "")
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        guard !text.isEmpty else { return nil }
+        return String(text.prefix(320))
+    }
+
+    private static func treatsPaperAsCourse(
+        text: String,
+        context: TranslationContext
+    ) -> Bool {
+        let text = text.lowercased()
+        if ["research paper", "write a paper", "submit a paper", "published paper"]
+            .contains(where: text.contains) {
+            return false
+        }
+        if ["teaching a paper", "second year paper", "paper is worth", "papers are worth"]
+            .contains(where: text.contains) {
+            return true
+        }
+        let surrounding = ([text, context.course.name] + context.recentSourceText)
+            .joined(separator: " ")
+            .lowercased()
+        return ["lecture", "assignment", "credits", "tutorial", "lab session", "week "]
+            .contains(where: surrounding.contains)
+            && ["this paper", "in this paper", "the paper"]
+                .contains(where: text.contains)
+    }
+
+    private static func hasSoftwareContext(
+        text: String,
+        context: TranslationContext
+    ) -> Bool {
+        let surrounding = ([text, context.course.name] + context.recentSourceText)
+            .joined(separator: " ")
+            .lowercased()
+        return [
+            "code", "coding", "compiler", "kotlin", "swift", "android",
+            "function", "project", "llm", "prompt", "development",
+        ].contains(where: surrounding.contains)
     }
 
     private static func replacingWholeTerm(
@@ -265,16 +370,32 @@ enum TranslateGemmaInputBuilder {
         }
     }
 
-    private static func normalized(_ text: String) -> String {
-        text.lowercased().unicodeScalars.compactMap { scalar in
-            CharacterSet.alphanumerics.contains(scalar) ? String(scalar) : nil
-        }.joined()
+}
+
+enum TranslateGemmaPromptBuilder {
+    static func make(_ input: TranslateGemmaPreparedInput) -> String {
+        return """
+        <<<source>>>English<<<target>>>Simplified Chinese<<<text>>>
+        \(input.text)
+        """
     }
 }
 
 enum TranslateGemmaOutputProcessor {
     private static let numberExpression = try! NSRegularExpression(
         pattern: #"\b\d+(?:[.:]\d+)*\b"#
+    )
+    private static let sourceNegationExpression = try! NSRegularExpression(
+        pattern: #"\b(?:no|not|never|without|cannot|can't|don't|doesn't|didn't|isn't|aren't|wasn't|weren't|won't|shouldn't|mustn't)\b"#,
+        options: [.caseInsensitive]
+    )
+    private static let sourceRequirementExpression = try! NSRegularExpression(
+        pattern: #"\b(?:must|required to|have to|has to)\b"#,
+        options: [.caseInsensitive]
+    )
+    private static let sourceRecommendationExpression = try! NSRegularExpression(
+        pattern: #"\b(?:should|need to|needs to)\b"#,
+        options: [.caseInsensitive]
     )
 
     static func process(
@@ -307,6 +428,21 @@ enum TranslateGemmaOutputProcessor {
         }) else {
             throw TranslateGemmaError.qualityRejected("数字信息缺失")
         }
+        guard !containsSourceNegation(sourceText)
+                || ["不", "没", "无", "未", "别", "勿", "禁止", "不能", "不会"]
+                    .contains(where: translation.contains) else {
+            throw TranslateGemmaError.qualityRejected("否定信息缺失")
+        }
+        guard !contains(sourceRequirementExpression, in: sourceText)
+                || ["必须", "务必", "需要", "不得不", "要求"]
+                    .contains(where: translation.contains) else {
+            throw TranslateGemmaError.qualityRejected("强制要求语气缺失")
+        }
+        guard !contains(sourceRecommendationExpression, in: sourceText)
+                || ["应", "应该", "建议", "需要"]
+                    .contains(where: translation.contains) else {
+            throw TranslateGemmaError.qualityRejected("建议语气缺失")
+        }
 
         let simplified = translation.applyingTransform(
             StringTransform("Traditional-Simplified"),
@@ -321,6 +457,15 @@ enum TranslateGemmaOutputProcessor {
             guard let range = Range(match.range, in: text) else { return nil }
             return String(text[range])
         }
+    }
+
+    private static func containsSourceNegation(_ text: String) -> Bool {
+        contains(sourceNegationExpression, in: text)
+    }
+
+    private static func contains(_ expression: NSRegularExpression, in text: String) -> Bool {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return expression.firstMatch(in: text, range: range) != nil
     }
 
     private static func containsEquivalentNumber(_ token: String, in text: String) -> Bool {

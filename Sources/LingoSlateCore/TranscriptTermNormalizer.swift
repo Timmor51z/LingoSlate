@@ -1,6 +1,12 @@
 import Foundation
 
 public struct TranscriptTermNormalizer: Sendable {
+    private struct ContextualAlias: Sendable {
+        var canonical: String
+        var alias: String
+        var requiredCues: Set<String>
+    }
+
     private struct PreferredTerm: Sendable {
         var canonical: String
         var normalized: String
@@ -28,6 +34,7 @@ public struct TranscriptTermNormalizer: Sendable {
     )
 
     private let terms: [PreferredTerm]
+    private let contextualAliases: [ContextualAlias]
 
     public init(course: Course) {
         self.init(
@@ -37,8 +44,11 @@ public struct TranscriptTermNormalizer: Sendable {
     }
 
     public init(course: Course, approvedTerms: [GlossaryTerm]) {
-        let preferred = (course.recognitionTerms ?? []).map {
-            (canonical: $0, match: $0, minimumSimilarity: 0.84)
+        let preferred = (course.recognitionTerms ?? []).flatMap { term in
+            [(canonical: term, match: term, minimumSimilarity: 0.84)]
+                + Self.exactCourseAliases(for: term).map {
+                    (canonical: term, match: $0, minimumSimilarity: 1.0)
+                }
         }
         let glossary = approvedTerms.filter(\.isApproved).flatMap { term in
             [(canonical: term.source, match: term.source, minimumSimilarity: 0.84)]
@@ -49,7 +59,14 @@ public struct TranscriptTermNormalizer: Sendable {
         let conservative = Self.courseNameTerms(course.name).map {
             (canonical: $0, match: $0, minimumSimilarity: 0.92)
         }
-        self.init(weightedTerms: preferred + glossary + conservative)
+        self.init(
+            weightedTerms: preferred + glossary + conservative,
+            contextualAliases: Self.contextualAliases(
+                course: course,
+                enabledTerms: (course.recognitionTerms ?? [])
+                    + approvedTerms.filter(\.isApproved).map(\.source)
+            )
+        )
     }
 
     public init(
@@ -61,11 +78,12 @@ public struct TranscriptTermNormalizer: Sendable {
         } + conservativeTerms.map {
             (canonical: $0, match: $0, minimumSimilarity: 0.92)
         }
-        self.init(weightedTerms: weightedTerms)
+        self.init(weightedTerms: weightedTerms, contextualAliases: [])
     }
 
     private init(
-        weightedTerms: [(canonical: String, match: String, minimumSimilarity: Double)]
+        weightedTerms: [(canonical: String, match: String, minimumSimilarity: Double)],
+        contextualAliases: [ContextualAlias] = []
     ) {
         var seen: Set<String> = []
         var prepared: [PreferredTerm] = []
@@ -93,12 +111,20 @@ public struct TranscriptTermNormalizer: Sendable {
         terms = prepared.sorted { lhs, rhs in
             lhs.normalized.count > rhs.normalized.count
         }
+        self.contextualAliases = contextualAliases
     }
 
     public func normalize(_ text: String) -> String {
         var result = Self.repairCurrencySymbols(in: text)
         for term in terms {
             result = replacingMatches(for: term, in: result)
+        }
+        for alias in contextualAliases where Self.hasContext(result, cues: alias.requiredCues) {
+            result = Self.replacingWholePhrase(
+                alias.alias,
+                with: alias.canonical,
+                in: result
+            )
         }
         return result
     }
@@ -230,6 +256,76 @@ public struct TranscriptTermNormalizer: Sendable {
         text.lowercased().unicodeScalars.compactMap { scalar in
             CharacterSet.alphanumerics.contains(scalar) ? String(scalar) : nil
         }.joined()
+    }
+
+    private static func exactCourseAliases(for term: String) -> [String] {
+        switch normalizedTerm(term) {
+        case "iaas":
+            return ["infrastructure as a service", "infrastructure as the service"]
+        case "paas":
+            return ["platform as a service", "platform as the service"]
+        case "saas":
+            return ["software as a service", "software as the service"]
+        case "nist":
+            return ["N I S T"]
+        case "ec2":
+            return ["E C two", "EC two"]
+        case "s3":
+            return ["S three"]
+        default:
+            return []
+        }
+    }
+
+    private static func contextualAliases(
+        course: Course,
+        enabledTerms: [String]
+    ) -> [ContextualAlias] {
+        guard course.lecturerAccent == .indianEnglish else { return [] }
+        let enabled = Set(enabledTerms.map(normalizedTerm))
+        let aliases: [(String, [String], Set<String>)] = [
+            ("NIST", ["NISC", "nest"], ["framework", "guidance", "security", "standard"]),
+            ("IaaS", ["eye as", "IELTS"], ["infrastructure", "service", "services"]),
+            ("PaaS", ["pay as", "pass"], ["platform", "service", "services"]),
+            ("SaaS", ["sass", "SAS"], ["software", "service", "services"]),
+            ("CloudTrail", ["cloud trail", "cloud trails"], ["audit", "aws", "logs", "logging"]),
+        ]
+        return aliases.flatMap { pair -> [ContextualAlias] in
+            let (canonical, variants, requiredCues) = pair
+            guard enabled.contains(normalizedTerm(canonical)) else { return [] }
+            return variants.map {
+                ContextualAlias(
+                    canonical: canonical,
+                    alias: $0,
+                    requiredCues: requiredCues
+                )
+            }
+        }
+    }
+
+    private static func hasContext(_ text: String, cues: Set<String>) -> Bool {
+        let normalizedWords = Set(words(in: text).map { $0.text.lowercased() })
+        return !normalizedWords.isDisjoint(with: cues)
+    }
+
+    private static func replacingWholePhrase(
+        _ phrase: String,
+        with replacement: String,
+        in text: String
+    ) -> String {
+        let pattern = "(?<![\\p{L}\\p{N}])"
+            + NSRegularExpression.escapedPattern(for: phrase)
+            + "(?![\\p{L}\\p{N}])"
+        guard let expression = try? NSRegularExpression(
+            pattern: pattern,
+            options: [.caseInsensitive]
+        ) else { return text }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return expression.stringByReplacingMatches(
+            in: text,
+            range: range,
+            withTemplate: replacement
+        )
     }
 
     private static func similarity(_ lhs: String, _ rhs: String) -> Double {

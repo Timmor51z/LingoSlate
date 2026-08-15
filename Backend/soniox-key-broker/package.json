@@ -1,0 +1,16 @@
+{
+  "name": "lingoslate-soniox-key-broker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "dev": "npx wrangler dev",
+    "deploy": "npx wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.113.0"
+  },
+  "overrides": {
+    "sharp": "0.35.0"
+  }
+}

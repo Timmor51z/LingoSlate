@@ -3,6 +3,8 @@ import SwiftUI
 
 struct UserProfileSettingsView: View {
     @ObservedObject var profileStore: UserProfileStore
+    @ObservedObject var sonioxCredentialStore: SonioxCredentialStore
+    @State private var sonioxAPIKey = ""
 
     private let regions = RegionOption.all
 
@@ -18,13 +20,46 @@ struct UserProfileSettingsView: View {
                 }
             }
 
+            Section("Soniox") {
+                SecureField("API Key", text: $sonioxAPIKey)
+
+                HStack {
+                    Button("保存") {
+                        sonioxCredentialStore.save(sonioxAPIKey)
+                        sonioxAPIKey = ""
+                    }
+                    .disabled(sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button("移除", role: .destructive) {
+                        sonioxCredentialStore.clear()
+                        sonioxAPIKey = ""
+                    }
+                    .disabled(!sonioxCredentialStore.hasAPIKey)
+
+                    Spacer()
+
+                    if sonioxCredentialStore.hasAPIKey {
+                        Label(
+                            sonioxCredentialStore.usesEnvironment ? "环境变量" : "已保存",
+                            systemImage: "checkmark.circle.fill"
+                        )
+                        .foregroundStyle(.green)
+                    }
+                }
+
+                if let errorMessage = sonioxCredentialStore.errorMessage {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                }
+            }
+
             Section {
                 Label("资料仅保存在本机", systemImage: "lock.fill")
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 230)
+        .frame(minWidth: 420, idealWidth: 460, minHeight: 320, idealHeight: 360)
     }
 }
 

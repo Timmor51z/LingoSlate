@@ -290,19 +290,23 @@ When audio was retained, a user can enhance an entire session or select a contin
 
 Do not route isolated low-confidence sentences to Soniox during a local session. Fragment routing loses context and makes timestamps, cost, and duplicate handling harder to reason about.
 
-### 7.4 Planned iPhone companion
+### 7.4 iPhone companion
 
 The iPhone version is technically viable but has a narrower role than the Mac app:
 
 - In-person lecture microphone capture and bilingual subtitles are fully supported.
 - Background microphone recording can continue with the appropriate audio session and background mode, while still handling calls, alarms, route changes, and interruptions.
-- Apple Translation remains on-device.
-- A lightweight Parakeet EOU 120M streaming model is the preferred local mobile baseline.
-- A higher-accuracy 0.6B model is optional for newer devices after memory, model-load, thermal, and battery testing.
-- Soniox is the recommended high-accuracy and older-device path.
+- Soniox real-time transcription and Chinese translation are the first mobile MVP path.
+- Local recording, transcript persistence, and summary fallback remain on-device.
+- Apple Translation and a lightweight local ASR model are later offline fallbacks, added only after battery, thermal, and long-session testing.
+- Production builds obtain a single-use temporary Soniox credential from a backend; permanent provider keys never ship in the app.
 - Capturing arbitrary audio from another iOS app is not equivalent to macOS ScreenCaptureKit. ReplayKit requires explicit screen recording or broadcasting and has content and lifecycle constraints, so same-device online-class capture is not an MVP promise.
 
 Build shared Swift packages for transcript events, course context, engine protocols, translation batching, persistence models, and summary schemas. Keep only audio capture and window/navigation UI platform-specific.
+
+The first mobile slice is implemented: `LingoSlateMobile` adds native 16 kHz microphone capture, AAC M4A recording, atomic bilingual session checkpoints, classroom history and playback, Soniox session control, input metering, and a live bilingual SwiftUI surface. `LingoSlateSoniox` still depends only on Foundation and `LingoSlateCore`, while FluidAudio and MLX remain outside the mobile cloud path. A zero-dependency Cloudflare Worker now issues one-use, 60-second Soniox credentials with a four-hour stream cap; the permanent Soniox key remains a Worker secret. The private MVP protects this broker with a rotatable bearer token stored in iOS Keychain. Public distribution must replace that shared token with authenticated users, App Attest, and per-user cost limits.
+
+A 120-second Indian-English cloud lecture also confirmed that Soniox context must be conservative: translation preferences are useful, but ambiguous recognition hints can force a plausible wrong term. Mobile course preparation must therefore keep recognition hints low-ambiguity and scope translation terms by course.
 
 The committed sequence is Mac MVP first, followed by an iPhone microphone-caption companion. The iPhone release should not delay validation of the Mac classroom pipeline.
 

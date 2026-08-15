@@ -4,6 +4,75 @@ import XCTest
 @testable import LingoSlateMac
 
 final class AppleTranslationEngineTests: XCTestCase {
+    func testTranslateGemmaReleaseBeforePreparationRemainsIdle() async {
+        let engine = TranslateGemmaTranslationEngine()
+
+        await engine.release()
+
+        let state = await engine.state
+        XCTAssertEqual(state, .idle)
+    }
+
+    func testTranslateGemmaPromptUsesStrictTranslationTemplate() {
+        let input = TranslateGemmaInputBuilder.make(
+            text: "It is managed by the provider.",
+            context: TranslationContext(
+                course: Course(
+                    name: "Cloud Computing",
+                    lecturerNames: ["Dr Singh"],
+                    lecturerAccent: .indianEnglish
+                ),
+                recentSourceText: [
+                    "Old context that should be dropped.",
+                    "We introduced IaaS.",
+                    "The provider owns the servers.",
+                    "Students configure virtual machines.",
+                    "This is the shared responsibility model.",
+                ],
+                phase: .postClass
+            )
+        )
+        let prompt = TranslateGemmaPromptBuilder.make(input)
+
+        XCTAssertEqual(
+            prompt,
+            "<<<source>>>English<<<target>>>Simplified Chinese<<<text>>>\nIt is managed by the provider."
+        )
+    }
+
+    func testTranslateGemmaLivePromptDoesNotIncludeRecentContext() {
+        let input = TranslateGemmaInputBuilder.make(
+            text: "Translate this sentence.",
+            context: TranslationContext(
+                course: Course(name: "Cloud Computing"),
+                recentSourceText: ["Do not include me."],
+                phase: .live
+            )
+        )
+
+        XCTAssertEqual(
+            TranslateGemmaPromptBuilder.make(input),
+            "<<<source>>>English<<<target>>>Simplified Chinese<<<text>>>\nTranslate this sentence."
+        )
+    }
+
+    func testTranslateGemmaUsesContextForSafeTermDisambiguationOnly() {
+        let input = TranslateGemmaInputBuilder.make(
+            text: "He is teaching a paper and we can test it in the playground.",
+            context: TranslationContext(
+                course: Course(name: "Mobile Computing"),
+                recentSourceText: ["We are writing Kotlin code."],
+                phase: .postClass
+            )
+        )
+        let prompt = TranslateGemmaPromptBuilder.make(input)
+
+        XCTAssertTrue(input.text.contains("课程"))
+        XCTAssertTrue(input.protectedTerms.values.contains("Playground"))
+        XCTAssertFalse(prompt.contains("Mobile Computing"))
+        XCTAssertFalse(prompt.contains("We are writing Kotlin code"))
+    }
+
     func testTranslateGemmaInputUsesApprovedGlossaryAndProtectsRecognitionTerms() {
         let input = TranslateGemmaInputBuilder.make(
             text: "Papers use MyWaikato and STEM; paperwork does not mean a paper.",
@@ -28,9 +97,8 @@ final class AppleTranslationEngineTests: XCTestCase {
             )
         )
 
-        XCTAssertTrue(input.text.hasPrefix("课程 use "))
-        XCTAssertTrue(input.text.hasSuffix("; paperwork does not mean a 课程."))
-        XCTAssertEqual(Set(input.protectedTerms.values), ["MyWaikato", "STEM"])
+        XCTAssertFalse(input.text.contains("课程"))
+        XCTAssertEqual(Set(input.protectedTerms.values), ["课程", "MyWaikato", "STEM"])
         XCTAssertFalse(input.text.contains("MyWaikato"))
         XCTAssertFalse(input.text.contains("STEM"))
     }
@@ -80,6 +148,55 @@ final class AppleTranslationEngineTests: XCTestCase {
             XCTAssertEqual(
                 error as? TranslateGemmaError,
                 .qualityRejected("数字信息缺失")
+            )
+        }
+    }
+
+    func testTranslateGemmaOutputRejectsMissingNegation() {
+        XCTAssertThrowsError(
+            try TranslateGemmaOutputProcessor.process(
+                "学生需要提交这份作业。",
+                sourceText: "Students should not submit this assignment.",
+                preparedInput: TranslateGemmaPreparedInput(
+                    text: "Students should not submit this assignment.",
+                    protectedTerms: [:]
+                )
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? TranslateGemmaError,
+                .qualityRejected("否定信息缺失")
+            )
+        }
+    }
+
+    func testTranslateGemmaOutputAcceptsChineseNegation() throws {
+        let translation = try TranslateGemmaOutputProcessor.process(
+            "学生不应提交这份作业。",
+            sourceText: "Students should not submit this assignment.",
+            preparedInput: TranslateGemmaPreparedInput(
+                text: "Students should not submit this assignment.",
+                protectedTerms: [:]
+            )
+        )
+
+        XCTAssertEqual(translation, "学生不应提交这份作业。")
+    }
+
+    func testTranslateGemmaOutputRejectsMissingRequirementModality() {
+        XCTAssertThrowsError(
+            try TranslateGemmaOutputProcessor.process(
+                "学生在星期五提交作业。",
+                sourceText: "Students must submit the assignment on Friday.",
+                preparedInput: TranslateGemmaPreparedInput(
+                    text: "Students must submit the assignment on Friday.",
+                    protectedTerms: [:]
+                )
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? TranslateGemmaError,
+                .qualityRejected("强制要求语气缺失")
             )
         }
     }

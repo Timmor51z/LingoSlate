@@ -1,5 +1,6 @@
 import LingoSlateAudio
 import LingoSlateCore
+import LingoSlateSoniox
 import Darwin
 import FluidAudio
 import Foundation
@@ -79,19 +80,23 @@ private enum BenchmarkError: LocalizedError {
     case invalidArguments
     case recognitionFailed(String)
     case unsupportedAudioFormat(String)
+    case missingSonioxAPIKey
 
     var errorDescription: String? {
         switch self {
         case .invalidArguments:
             return "Usage: swift run LingoSlateBenchmark "
-                + "[--model eou120m|unified640|unified1120|unifiedOffline|nemotron1120] "
-                + "[--audio raw|adaptive] [--start-seconds N] [--duration-seconds N] "
+                + "[--model eou120m|unified640|unified1120|unifiedOffline|nemotron1120|soniox] "
+                + "[--audio raw|adaptive] [--term TERM] "
+                + "[--start-seconds N] [--duration-seconds N] "
                 + "<reference.json> <audio-file> <report.json>"
         case let .recognitionFailed(message):
             return "Recognition failed: \(message)"
         case let .unsupportedAudioFormat(fileExtension):
             return "Unsupported benchmark audio format '.\(fileExtension)'. "
                 + "Convert input to 16 kHz mono PCM WAV first."
+        case .missingSonioxAPIKey:
+            return "Set SONIOX_API_KEY before running the Soniox benchmark"
         }
     }
 }
@@ -102,6 +107,7 @@ private enum BenchmarkModel: String {
     case unified1120
     case unifiedOffline
     case nemotron1120
+    case soniox
 
     var displayName: String {
         switch self {
@@ -115,10 +121,12 @@ private enum BenchmarkModel: String {
             return FluidAudioStreamingProfile.unifiedOffline15s.displayName
         case .nemotron1120:
             return FluidAudioStreamingProfile.nemotron1120ms.displayName
+        case .soniox:
+            return "Soniox stt-rt-v5"
         }
     }
 
-    func makeEngine() -> any SpeechRecognitionEngine {
+    func makeEngine() throws -> any SpeechRecognitionEngine {
         switch self {
         case .eou120m:
             return FluidAudioRecognitionEngine()
@@ -130,11 +138,21 @@ private enum BenchmarkModel: String {
             return FluidAudioStreamingRecognitionEngine(profile: .unifiedOffline15s)
         case .nemotron1120:
             return FluidAudioStreamingRecognitionEngine(profile: .nemotron1120ms)
+        case .soniox:
+            guard let apiKey = ProcessInfo.processInfo.environment["SONIOX_API_KEY"],
+                  !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw BenchmarkError.missingSonioxAPIKey
+            }
+            return SonioxRecognitionEngine(apiKey: apiKey)
         }
     }
 
     var supportsTimestampWindows: Bool {
         self != .unifiedOffline
+    }
+
+    var requiresRealtimePacing: Bool {
+        self == .soniox
     }
 }
 
@@ -148,6 +166,7 @@ private struct BenchmarkOptions {
     var audio: BenchmarkAudio = .raw
     var startSeconds: Double = 0
     var durationSeconds: Double?
+    var terms: [String] = []
     var referenceURL: URL
     var audioURL: URL
     var reportURL: URL
@@ -157,6 +176,7 @@ private struct BenchmarkOptions {
         var audio = BenchmarkAudio.raw
         var startSeconds = 0.0
         var durationSeconds: Double?
+        var terms: [String] = []
         var paths: [String] = []
         var index = 0
 
@@ -190,6 +210,12 @@ private struct BenchmarkOptions {
                     throw BenchmarkError.invalidArguments
                 }
                 durationSeconds = value
+            case "--term":
+                index += 1
+                guard index < arguments.count, !arguments[index].isEmpty else {
+                    throw BenchmarkError.invalidArguments
+                }
+                terms.append(arguments[index])
             default:
                 paths.append(arguments[index])
             }
@@ -204,6 +230,7 @@ private struct BenchmarkOptions {
             audio: audio,
             startSeconds: startSeconds,
             durationSeconds: durationSeconds,
+            terms: terms,
             referenceURL: URL(fileURLWithPath: paths[0]),
             audioURL: URL(fileURLWithPath: paths[1]),
             reportURL: URL(fileURLWithPath: paths[2])
@@ -223,6 +250,14 @@ private actor RecognitionCollector {
                     text: text,
                     startSeconds: startTime,
                     endSeconds: endTime
+                )
+            )
+        case let .bilingualFinal(result):
+            segments.append(
+                HypothesisSegment(
+                    text: result.sourceText,
+                    startSeconds: result.startTime,
+                    endSeconds: result.endTime
                 )
             )
         case let .failed(message):
@@ -296,7 +331,7 @@ private struct LingoSlateBenchmark {
             return midpoint >= evaluationStartSeconds && midpoint < evaluationEndSeconds
         }
 
-        let baseEngine = options.model.makeEngine()
+        let baseEngine = try options.model.makeEngine()
         let engine: any SpeechRecognitionEngine = options.audio == .adaptive
             ? AudioEnhancingRecognitionEngine(base: baseEngine)
             : baseEngine
@@ -310,7 +345,10 @@ private struct LingoSlateBenchmark {
         let modelStartedAt = Date()
         try await engine.start(
             configuration: RecognitionConfiguration(
-                course: Course(name: reference.session.title ?? "LecSync benchmark")
+                course: Course(
+                    name: reference.session.title ?? "LecSync benchmark",
+                    recognitionTerms: options.terms
+                )
             )
         )
         let modelLoadSeconds = Date().timeIntervalSince(modelStartedAt)
@@ -318,11 +356,19 @@ private struct LingoSlateBenchmark {
         let inferenceStartedAt = Date()
         let frameSize = 3_200
         let progressInterval = Int(sampleRate * 300)
+        let clock = ContinuousClock()
+        let streamingStartedAt = clock.now
         var nextProgressOffset = progressInterval
         var offset = 0
 
         do {
             while offset < samples.count {
+                if options.model.requiresRealtimePacing {
+                    let target = streamingStartedAt.advanced(
+                        by: .seconds(Double(offset) / sampleRate)
+                    )
+                    try await clock.sleep(until: target)
+                }
                 let end = min(offset + frameSize, samples.count)
                 try await engine.accept(
                     AudioFrame(

@@ -37,6 +37,7 @@ private struct TranslationReport: Codable {
     var referenceKind: String
     var referenceSessionID: String
     var model: String
+    var contextMode: String
     var sampleCount: Int
     var modelLoadSeconds: Double
     var meanLatencySeconds: Double
@@ -53,12 +54,18 @@ private struct TranslationReport: Codable {
     var caveats: [String]
 }
 
+private enum ContextMode: String {
+    case none
+    case recent
+}
+
 private struct Options {
     var sampleCount = 24
     var terms: [String] = []
     var glossary: [String: String] = [:]
     var minimumWords = 6
     var maximumWords = 36
+    var contextMode: ContextMode = .none
     var referenceURL: URL
     var reportURL: URL
 
@@ -68,6 +75,7 @@ private struct Options {
         var glossary: [String: String] = [:]
         var minimumWords = 6
         var maximumWords = 36
+        var contextMode = ContextMode.none
         var paths: [String] = []
         var index = 0
 
@@ -114,6 +122,13 @@ private struct Options {
                     throw BenchmarkError.invalidArguments
                 }
                 maximumWords = value
+            case "--context":
+                index += 1
+                guard index < arguments.count,
+                      let value = ContextMode(rawValue: arguments[index]) else {
+                    throw BenchmarkError.invalidArguments
+                }
+                contextMode = value
             default:
                 paths.append(arguments[index])
             }
@@ -132,6 +147,7 @@ private struct Options {
             glossary: glossary,
             minimumWords: minimumWords,
             maximumWords: maximumWords,
+            contextMode: contextMode,
             referenceURL: URL(fileURLWithPath: paths[0]),
             reportURL: URL(fileURLWithPath: paths[1])
         )
@@ -148,6 +164,7 @@ private enum BenchmarkError: LocalizedError {
         case .invalidArguments:
             return "Usage: swift run LingoSlateTranslationBenchmark [--sample-count N] "
                 + "[--minimum-words N] [--maximum-words N] [--term TERM]... "
+                + "[--context none|recent] "
                 + "[--glossary SOURCE=TARGET]... <reference.json> <report.json>"
         case .modelUnavailable:
             return "TranslateGemma could not be prepared"
@@ -203,7 +220,6 @@ private struct LingoSlateTranslationBenchmark {
         let modelLoadSeconds = Date().timeIntervalSince(loadStartedAt)
 
         var reports: [SegmentReport] = []
-        var recentSourceText: [String] = []
         var numericReferenceCount = 0
         var numericMatchedCount = 0
         var termReferenceCount = 0
@@ -220,13 +236,20 @@ private struct LingoSlateTranslationBenchmark {
         }
 
         for (offset, segment) in samples.enumerated() {
+            let recentSourceText = options.contextMode == .recent
+                ? reference.segments
+                    .filter { $0.index < segment.index }
+                    .suffix(4)
+                    .map(\.text)
+                : []
             let startedAt = Date()
             let translation = try await engine.translate(
                 segment.text,
                 context: TranslationContext(
                     course: course,
-                    recentSourceText: Array(recentSourceText.suffix(4)),
-                    approvedTerms: glossaryTerms
+                    recentSourceText: recentSourceText,
+                    approvedTerms: glossaryTerms,
+                    phase: options.contextMode == .recent ? .postClass : .live
                 )
             )
             let latency = Date().timeIntervalSince(startedAt)
@@ -277,7 +300,6 @@ private struct LingoSlateTranslationBenchmark {
                     )
                 )
             )
-            recentSourceText.append(segment.text)
             print("Translated sample \(offset + 1)/\(samples.count), segment \(segment.index)")
         }
 
@@ -287,6 +309,7 @@ private struct LingoSlateTranslationBenchmark {
             referenceKind: "LecSync competitor output; not manually corrected ground truth",
             referenceSessionID: reference.session.id,
             model: engine.identifier,
+            contextMode: options.contextMode.rawValue,
             sampleCount: reports.count,
             modelLoadSeconds: modelLoadSeconds,
             meanLatencySeconds: mean(latencies),
@@ -314,6 +337,7 @@ private struct LingoSlateTranslationBenchmark {
                 "Character F-score is a local 1...6 character n-gram F2 diagnostic; it does not measure semantic equivalence.",
                 "Human bilingual review is required before making translation-accuracy claims.",
                 "The sampled source is LecSync English so this report isolates translation from LingoSlate ASR errors.",
+                "Run once with --context none and once with --context recent for an A/B comparison.",
             ]
         )
 

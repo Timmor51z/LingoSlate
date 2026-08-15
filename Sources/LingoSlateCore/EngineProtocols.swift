@@ -36,21 +36,69 @@ public protocol AudioCaptureEngine: Sendable {
     func requestPermission() async -> Bool
     func start() async throws
     func stop() async
+    func captureDiagnostics() async -> AudioCaptureDiagnostics?
+}
+
+public extension AudioCaptureEngine {
+    func captureDiagnostics() async -> AudioCaptureDiagnostics? { nil }
+}
+
+public protocol RecordingAudioCaptureEngine: AudioCaptureEngine {
+    var recordingFrames: AsyncStream<AudioFrame> { get }
 }
 
 public struct RecognitionConfiguration: Sendable {
     public var course: Course
     public var language: String
     public var approvedTerms: [GlossaryTerm]
+    public var translationTargetLanguage: String?
 
     public init(
         course: Course,
         language: String = "en",
-        approvedTerms: [GlossaryTerm] = []
+        approvedTerms: [GlossaryTerm] = [],
+        translationTargetLanguage: String? = nil
     ) {
         self.course = course
         self.language = language
         self.approvedTerms = approvedTerms.filter(\.isApproved)
+        self.translationTargetLanguage = translationTargetLanguage?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfBlank
+    }
+}
+
+public struct BilingualRecognitionResult: Equatable, Sendable {
+    public var id: UUID
+    public var sourceText: String
+    public var translatedText: String?
+    public var sourceLanguage: String?
+    public var startTime: TimeInterval
+    public var endTime: TimeInterval
+    public var speaker: String?
+    public var recognitionProvider: String
+    public var translationProvider: String
+
+    public init(
+        id: UUID,
+        sourceText: String,
+        translatedText: String? = nil,
+        sourceLanguage: String? = nil,
+        startTime: TimeInterval,
+        endTime: TimeInterval,
+        speaker: String? = nil,
+        recognitionProvider: String,
+        translationProvider: String
+    ) {
+        self.id = id
+        self.sourceText = sourceText
+        self.translatedText = translatedText?.nilIfBlank
+        self.sourceLanguage = sourceLanguage?.nilIfBlank
+        self.startTime = startTime
+        self.endTime = endTime
+        self.speaker = speaker?.nilIfBlank
+        self.recognitionProvider = recognitionProvider
+        self.translationProvider = translationProvider
     }
 }
 
@@ -71,8 +119,22 @@ public enum RecognitionEvent: Sendable {
         speaker: String?,
         provider: String
     )
+    case bilingualProvisional(BilingualRecognitionResult)
+    case bilingualFinal(BilingualRecognitionResult)
     case failed(message: String)
     case finished
+}
+
+public struct TimedTranscriptChunk: Equatable, Sendable {
+    public var text: String
+    public var startTime: TimeInterval
+    public var endTime: TimeInterval
+
+    public init(text: String, startTime: TimeInterval, endTime: TimeInterval) {
+        self.text = text
+        self.startTime = max(0, startTime)
+        self.endTime = max(self.startTime, endTime)
+    }
 }
 
 public protocol SpeechRecognitionEngine: Sendable {
@@ -83,19 +145,28 @@ public protocol SpeechRecognitionEngine: Sendable {
     func finalize() async throws
 }
 
+public enum TranslationPhase: Equatable, Sendable {
+    case live
+    case contextualLive
+    case postClass
+}
+
 public struct TranslationContext: Sendable {
     public var course: Course
     public var recentSourceText: [String]
     public var approvedTerms: [GlossaryTerm]
+    public var phase: TranslationPhase
 
     public init(
         course: Course,
         recentSourceText: [String],
-        approvedTerms: [GlossaryTerm] = []
+        approvedTerms: [GlossaryTerm] = [],
+        phase: TranslationPhase = .live
     ) {
         self.course = course
         self.recentSourceText = recentSourceText
         self.approvedTerms = approvedTerms.filter(\.isApproved)
+        self.phase = phase
     }
 }
 
@@ -106,26 +177,55 @@ public protocol TranslationEngine: Sendable {
 }
 
 public protocol TranslationRefinementEngine: Sendable {
+    func shouldRefine(context: TranslationContext) -> Bool
     func refine(_ text: String, context: TranslationContext) async throws -> String
+}
+
+public extension TranslationRefinementEngine {
+    func shouldRefine(context: TranslationContext) -> Bool { true }
+}
+
+public enum TranslationRefinementPolicy: Sendable {
+    case always
+    case postClassOnly
+    case contextualAndPostClass
 }
 
 public struct StagedTranslationEngine: TranslationEngine, TranslationRefinementEngine {
     public let identifier: String
+    public let primaryIdentifier: String
+    public let refinementIdentifier: String
 
     private let primary: any TranslationEngine
     private let refinement: any TranslationEngine
+    private let refinementPolicy: TranslationRefinementPolicy
 
     public init(
         primary: any TranslationEngine,
-        refinement: any TranslationEngine
+        refinement: any TranslationEngine,
+        refinementPolicy: TranslationRefinementPolicy = .always
     ) {
         self.primary = primary
         self.refinement = refinement
+        self.refinementPolicy = refinementPolicy
+        self.primaryIdentifier = primary.identifier
+        self.refinementIdentifier = refinement.identifier
         self.identifier = "\(primary.identifier)+\(refinement.identifier)"
     }
 
     public func translate(_ text: String, context: TranslationContext) async throws -> String {
         try await primary.translate(text, context: context)
+    }
+
+    public func shouldRefine(context: TranslationContext) -> Bool {
+        switch refinementPolicy {
+        case .always:
+            return true
+        case .postClassOnly:
+            return context.phase == .postClass
+        case .contextualAndPostClass:
+            return context.phase != .live
+        }
     }
 
     public func refine(_ text: String, context: TranslationContext) async throws -> String {

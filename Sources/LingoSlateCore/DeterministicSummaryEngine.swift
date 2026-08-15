@@ -9,7 +9,10 @@ public struct DeterministicSummaryEngine: SummaryEngine {
 
     public static func makeSummary(for document: SessionDocument) -> SessionSummary {
         let segments = document.segments
-            .filter { !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .filter {
+                $0.translationExclusionReason == nil
+                    && !$0.sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
             .sorted { $0.startTime < $1.startTime }
 
         guard !segments.isEmpty else {
@@ -96,7 +99,7 @@ public struct DeterministicSummaryEngine: SummaryEngine {
 
         for segment in segments {
             let source = segment.sourceText.lowercased()
-            guard actionCues.contains(where: source.contains) else { continue }
+            guard containsActionCue(in: source) else { continue }
             items.append(timestamped(displayText(for: segment), at: segment.startTime))
         }
 
@@ -121,6 +124,13 @@ public struct DeterministicSummaryEngine: SummaryEngine {
         text.split { character in
             !character.isLetter && !character.isNumber && character != "-"
         }.map(String.init)
+    }
+
+    private static func containsActionCue(in text: String) -> Bool {
+        let words = Set(tokens(in: text))
+        return actionCues.contains { cue in
+            cue.contains(" ") ? text.contains(cue) : words.contains(cue)
+        }
     }
 
     private static func isConceptCandidate(_ token: String) -> Bool {
@@ -151,8 +161,8 @@ public struct DeterministicSummaryEngine: SummaryEngine {
         "remember to",
         "you need to",
         "you should",
-        "exam",
-        "quiz",
+        "exam date",
+        "quiz date",
         "homework",
         "action item",
     ]

@@ -12,6 +12,8 @@ let package = Package(
     products: [
         .library(name: "LingoSlateCore", targets: ["LingoSlateCore"]),
         .library(name: "LingoSlateAudio", targets: ["LingoSlateAudio"]),
+        .library(name: "LingoSlateSoniox", targets: ["LingoSlateSoniox"]),
+        .library(name: "LingoSlateMobile", targets: ["LingoSlateMobile"]),
         .library(name: "LingoSlateTranslation", targets: ["LingoSlateTranslation"]),
         .executable(name: "LingoSlateMac", targets: ["LingoSlateMac"]),
         .executable(name: "LingoSlateASRSmoke", targets: ["LingoSlateASRSmoke"]),
@@ -53,6 +55,14 @@ let package = Package(
             ]
         ),
         .target(
+            name: "LingoSlateSoniox",
+            dependencies: ["LingoSlateCore"]
+        ),
+        .target(
+            name: "LingoSlateMobile",
+            dependencies: ["LingoSlateCore", "LingoSlateSoniox"]
+        ),
+        .target(
             name: "LingoSlateTranslation",
             dependencies: [
                 "LingoSlateCore",
@@ -68,6 +78,7 @@ let package = Package(
             dependencies: [
                 "LingoSlateCore",
                 "LingoSlateAudio",
+                "LingoSlateSoniox",
                 "LingoSlateTranslation",
             ]
         ),
@@ -76,6 +87,7 @@ let package = Package(
             dependencies: [
                 "LingoSlateCore",
                 "LingoSlateAudio",
+                "LingoSlateSoniox",
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ]
         ),
@@ -84,6 +96,7 @@ let package = Package(
             dependencies: [
                 "LingoSlateCore",
                 "LingoSlateAudio",
+                "LingoSlateSoniox",
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ]
         ),
@@ -100,7 +113,7 @@ let package = Package(
         ),
         .testTarget(
             name: "LingoSlateCoreTests",
-            dependencies: ["LingoSlateCore", "LingoSlateAudio"]
+            dependencies: ["LingoSlateCore", "LingoSlateAudio", "LingoSlateSoniox"]
         ),
         .testTarget(
             name: "LingoSlateMacTests",
@@ -109,6 +122,10 @@ let package = Package(
                 "LingoSlateCore",
                 "LingoSlateTranslation",
             ]
+        ),
+        .testTarget(
+            name: "LingoSlateMobileTests",
+            dependencies: ["LingoSlateCore", "LingoSlateMobile"]
         ),
     ]
 )

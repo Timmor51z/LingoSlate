@@ -7,6 +7,7 @@ public struct Course: Codable, Hashable, Identifiable, Sendable {
     public var roughDescription: String?
     public var domain: String?
     public var lecturerNames: [String]
+    public var lecturerAccent: LecturerAccentProfile?
     public var recognitionTerms: [String]?
     public var targetLanguage: String
     public var contextMaturity: Int
@@ -18,6 +19,7 @@ public struct Course: Codable, Hashable, Identifiable, Sendable {
         roughDescription: String? = nil,
         domain: String? = nil,
         lecturerNames: [String] = [],
+        lecturerAccent: LecturerAccentProfile? = nil,
         recognitionTerms: [String] = [],
         targetLanguage: String = "zh-Hans",
         contextMaturity: Int = 0
@@ -28,12 +30,24 @@ public struct Course: Codable, Hashable, Identifiable, Sendable {
         self.roughDescription = roughDescription?.nilIfBlank
         self.domain = domain?.nilIfBlank
         self.lecturerNames = lecturerNames
+        self.lecturerAccent = lecturerAccent
         let recognitionTerms = recognitionTerms.compactMap(\.nilIfBlank)
         self.recognitionTerms = recognitionTerms.isEmpty ? nil : recognitionTerms
         self.targetLanguage = targetLanguage
         self.contextMaturity = max(0, contextMaturity)
     }
 
+}
+
+public enum LecturerAccentProfile: String, Codable, CaseIterable, Sendable {
+    case indianEnglish
+
+    public var displayName: String {
+        switch self {
+        case .indianEnglish:
+            return "Indian English"
+        }
+    }
 }
 public struct GlossaryTerm: Codable, Hashable, Identifiable, Sendable {
     public enum Origin: String, Codable, Sendable {
@@ -78,6 +92,7 @@ public enum SessionKind: String, Codable, CaseIterable, Sendable {
 public enum ProcessingMode: String, Codable, CaseIterable, Sendable {
     case local
     case highAccuracy
+    case soniox
 }
 
 public enum AudioSource: String, Codable, CaseIterable, Sendable {
@@ -123,6 +138,31 @@ public struct SessionPreparationDiagnostics: Codable, Hashable, Sendable {
     }
 }
 
+public struct AudioCaptureDiagnostics: Codable, Hashable, Sendable {
+    public var inputDeviceName: String?
+    public var inputDeviceUID: String?
+    public var inputSampleRate: Double?
+    public var recognitionDroppedFrameCount: Int
+    public var recordingDroppedFrameCount: Int
+    public var routeChangeCount: Int
+
+    public init(
+        inputDeviceName: String? = nil,
+        inputDeviceUID: String? = nil,
+        inputSampleRate: Double? = nil,
+        recognitionDroppedFrameCount: Int = 0,
+        recordingDroppedFrameCount: Int = 0,
+        routeChangeCount: Int = 0
+    ) {
+        self.inputDeviceName = inputDeviceName?.nilIfBlank
+        self.inputDeviceUID = inputDeviceUID?.nilIfBlank
+        self.inputSampleRate = inputSampleRate
+        self.recognitionDroppedFrameCount = max(0, recognitionDroppedFrameCount)
+        self.recordingDroppedFrameCount = max(0, recordingDroppedFrameCount)
+        self.routeChangeCount = max(0, routeChangeCount)
+    }
+}
+
 public struct SessionConfiguration: Codable, Hashable, Sendable {
     public var course: Course
     public var kind: SessionKind
@@ -161,6 +201,10 @@ public struct TranscriptSegment: Codable, Hashable, Identifiable, Sendable {
     public var state: TranscriptSegmentState
     public var provider: String
     public var isUserCorrected: Bool
+    public var translationProvider: String?
+    public var translationFailureReason: String?
+    public var translationExclusionReason: String?
+    public var sourceLanguage: String?
 
     public init(
         id: UUID = UUID(),
@@ -171,7 +215,11 @@ public struct TranscriptSegment: Codable, Hashable, Identifiable, Sendable {
         speaker: String? = nil,
         state: TranscriptSegmentState,
         provider: String,
-        isUserCorrected: Bool = false
+        isUserCorrected: Bool = false,
+        translationProvider: String? = nil,
+        translationFailureReason: String? = nil,
+        translationExclusionReason: String? = nil,
+        sourceLanguage: String? = nil
     ) {
         self.id = id
         self.startTime = startTime
@@ -182,6 +230,10 @@ public struct TranscriptSegment: Codable, Hashable, Identifiable, Sendable {
         self.state = state
         self.provider = provider
         self.isUserCorrected = isUserCorrected
+        self.translationProvider = translationProvider
+        self.translationFailureReason = translationFailureReason
+        self.translationExclusionReason = translationExclusionReason
+        self.sourceLanguage = sourceLanguage?.nilIfBlank
     }
 }
 
@@ -212,36 +264,51 @@ public struct SessionMarker: Codable, Hashable, Identifiable, Sendable {
 }
 
 public struct SessionDocument: Codable, Hashable, Identifiable, Sendable {
+    public var schemaVersion: Int?
     public let id: UUID
     public var configuration: SessionConfiguration
     public var startedAt: Date
     public var endedAt: Date?
+    public var processedAt: Date?
     public var segments: [TranscriptSegment]
     public var markers: [SessionMarker]
     public var summary: SessionSummary?
     public var audioFileName: String?
     public var preparationDiagnostics: SessionPreparationDiagnostics?
+    public var audioCaptureDiagnostics: AudioCaptureDiagnostics?
+    public var failureMessage: String?
+    public var isPostProcessingComplete: Bool?
 
     public init(
+        schemaVersion: Int? = 1,
         id: UUID = UUID(),
         configuration: SessionConfiguration,
         startedAt: Date = Date(),
         endedAt: Date? = nil,
+        processedAt: Date? = nil,
         segments: [TranscriptSegment] = [],
         markers: [SessionMarker] = [],
         summary: SessionSummary? = nil,
         audioFileName: String? = nil,
-        preparationDiagnostics: SessionPreparationDiagnostics? = nil
+        preparationDiagnostics: SessionPreparationDiagnostics? = nil,
+        audioCaptureDiagnostics: AudioCaptureDiagnostics? = nil,
+        failureMessage: String? = nil,
+        isPostProcessingComplete: Bool? = nil
     ) {
+        self.schemaVersion = schemaVersion
         self.id = id
         self.configuration = configuration
         self.startedAt = startedAt
         self.endedAt = endedAt
+        self.processedAt = processedAt
         self.segments = segments
         self.markers = markers
         self.summary = summary
         self.audioFileName = audioFileName?.nilIfBlank
         self.preparationDiagnostics = preparationDiagnostics
+        self.audioCaptureDiagnostics = audioCaptureDiagnostics
+        self.failureMessage = failureMessage?.nilIfBlank
+        self.isPostProcessingComplete = isPostProcessingComplete
     }
 }
 
@@ -258,7 +325,7 @@ public struct TranscriptSnapshot: Equatable, Sendable {
     }
 }
 
-private extension String {
+extension String {
     var nilIfBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed

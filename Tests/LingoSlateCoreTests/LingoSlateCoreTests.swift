@@ -21,7 +21,21 @@ final class LingoSlateCoreTests: XCTestCase {
             for: UserProfile(regionCode: "US")
         )
         XCTAssertTrue(globalTerms.contains { $0.source == "Overleaf" })
+        XCTAssertTrue(globalTerms.contains { $0.source == "LLM" && $0.aliases.contains("LLMs") })
+        XCTAssertTrue(globalTerms.contains { $0.source == "Jetpack Compose" })
         XCTAssertFalse(globalTerms.contains { $0.source == "paper outline" })
+    }
+
+    func testMobileCourseSeedsIncludeAndroidTerminology() {
+        let terms = CourseTermSeedBuilder.suggestions(
+            courseName: "COMPX551 Mobile and Wearable Computing",
+            schoolName: "University of Waikato"
+        )
+
+        XCTAssertTrue(terms.contains("Android Studio"))
+        XCTAssertTrue(terms.contains("Jetpack Compose"))
+        XCTAssertTrue(terms.contains("Kotlin"))
+        XCTAssertTrue(terms.contains("XML"))
     }
 
     func testAdaptiveGainRaisesQuietSpeechWithoutClipping() {
@@ -185,6 +199,27 @@ final class LingoSlateCoreTests: XCTestCase {
         }
     }
 
+    func testMicrophoneRouteChangePolicyIgnoresStartupConfigurationNotification() {
+        XCTAssertFalse(
+            MicrophoneRouteChangePolicy.shouldFailCapture(
+                expectedDeviceID: 42,
+                currentDeviceID: 42
+            )
+        )
+        XCTAssertFalse(
+            MicrophoneRouteChangePolicy.shouldFailCapture(
+                expectedDeviceID: 42,
+                currentDeviceID: nil
+            )
+        )
+        XCTAssertTrue(
+            MicrophoneRouteChangePolicy.shouldFailCapture(
+                expectedDeviceID: 42,
+                currentDeviceID: 84
+            )
+        )
+    }
+
     func testSessionAudioBufferTracksDurationAndReleasesFrames() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("LingoSlateAudioResetTests-\(UUID().uuidString)")
@@ -244,6 +279,34 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertGreaterThan(duration, 0.9)
         XCTAssertLessThan(duration, 1.2)
         XCTAssertGreaterThan(fileSize, 500)
+    }
+
+    func testSessionAudioBufferRecoversPlayableStaleRecording() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LingoSlateAudioRecovery-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sessionID = UUID()
+        let finalURL = directory.appendingPathComponent("\(sessionID.uuidString).m4a")
+        let buffer = SessionAudioBuffer()
+        try await buffer.prepareRecording(to: finalURL)
+        try await buffer.append(
+            AudioFrame(
+                samples: [Float](repeating: 0.1, count: 16_000),
+                sampleRate: 16_000,
+                capturedAt: 0
+            )
+        )
+        _ = try await buffer.finishWriting()
+        let staleURL = directory.appendingPathComponent(
+            ".\(sessionID.uuidString)-\(UUID().uuidString).m4a"
+        )
+        try FileManager.default.moveItem(at: finalURL, to: staleURL)
+
+        let recovered = SessionAudioBuffer.recoverStaleRecordings(in: directory)
+
+        XCTAssertEqual(recovered, [finalURL])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: finalURL.path))
+        XCTAssertGreaterThan(try AVAudioFile(forReading: finalURL).length, 0)
     }
 
     func testSessionAudioBufferReplaysSavedAudioInBoundedChunks() async throws {
@@ -318,6 +381,16 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertEqual(
             cursor.uncommittedText(in: "The event loop schedules"),
             ""
+        )
+    }
+
+    func testIncrementalTranscriptCursorHandlesLongExactPrefix() {
+        let committed = (0..<5_000).map { "word\($0)" }.joined(separator: " ")
+        let cursor = IncrementalTranscriptCursor(committedTranscript: committed)
+
+        XCTAssertEqual(
+            cursor.uncommittedText(in: committed + ", final classroom point."),
+            "final classroom point."
         )
     }
 
@@ -447,9 +520,29 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertEqual(normalized, "Secure Cloud Application Engineering")
         XCTAssertTrue(terms.contains("Secure Cloud Application Engineering"))
         XCTAssertTrue(terms.contains("Cloud Application"))
+        XCTAssertTrue(terms.contains("IaaS"))
+        XCTAssertTrue(terms.contains("PaaS"))
+        XCTAssertTrue(terms.contains("SaaS"))
+        XCTAssertTrue(terms.contains("NIST"))
         XCTAssertTrue(terms.contains("AWS"))
         XCTAssertTrue(terms.contains("OWASP"))
         XCTAssertTrue(terms.contains("REST API"))
+    }
+
+    func testCloudCourseBuildsTranslationGlossaryWithoutAffectingOtherCourses() {
+        let cloudTerms = CourseTranslationGlossary.approvedTerms(
+            for: Course(name: "Secure Cloud Application Engineering")
+        )
+        let mobileTerms = CourseTranslationGlossary.approvedTerms(
+            for: Course(name: "Mobile and Wearable Computing")
+        )
+
+        XCTAssertEqual(
+            cloudTerms.first(where: { $0.source == "cloud broker" })?.target,
+            "云服务经纪商"
+        )
+        XCTAssertTrue(cloudTerms.allSatisfy(\.isApproved))
+        XCTAssertTrue(mobileTerms.isEmpty)
     }
 
     func testCourseDecodesLegacyDataWithoutRecognitionTerms() throws {
@@ -552,6 +645,87 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertEqual(
             normalizer.normalize("Use Over leaf and submit to I triple E."),
             "Use Overleaf and submit to IEEE."
+        )
+    }
+
+    func testCourseAcronymAliasesRequireExactSafePhrases() {
+        let normalizer = TranscriptTermNormalizer(
+            course: Course(
+                name: "Cloud Computing",
+                recognitionTerms: ["IaaS", "PaaS", "SaaS", "NIST", "EC2", "S3"]
+            ),
+            approvedTerms: []
+        )
+
+        XCTAssertEqual(
+            normalizer.normalize(
+                "Infrastructure as the service, platform as a service, and software as the service."
+            ),
+            "IaaS, PaaS, and SaaS."
+        )
+        XCTAssertEqual(normalizer.normalize("The ice on the lake is thin."), "The ice on the lake is thin.")
+        XCTAssertEqual(normalizer.normalize("This is important."), "This is important.")
+        XCTAssertEqual(normalizer.normalize("NISC guidance."), "NISC guidance.")
+        XCTAssertEqual(normalizer.normalize("Use E C two and S three."), "Use EC2 and S3.")
+    }
+
+    func testIndianEnglishAliasesRequireCourseTermsAndSentenceContext() {
+        let normalizer = TranscriptTermNormalizer(
+            course: Course(
+                name: "Cloud Computing",
+                lecturerAccent: .indianEnglish,
+                recognitionTerms: ["NIST", "IaaS", "PaaS", "SaaS", "CloudTrail"]
+            ),
+            approvedTerms: []
+        )
+
+        XCTAssertEqual(
+            normalizer.normalize(
+                "The NISC security framework compares eye as cloud services, pay as platform services, and sass software services."
+            ),
+            "The NIST security framework compares IaaS cloud services, PaaS platform services, and SaaS software services."
+        )
+        XCTAssertEqual(
+            normalizer.normalize("AWS cloud trail logging records API calls."),
+            "AWS CloudTrail logging records API calls."
+        )
+        XCTAssertEqual(
+            normalizer.normalize("AWS auditing examples include cloud trails and logs."),
+            "AWS auditing examples include CloudTrail and logs."
+        )
+        XCTAssertEqual(
+            normalizer.normalize(
+                "The nest security standard compares IELTS infrastructure services, pass platform services, and SAS software services."
+            ),
+            "The NIST security standard compares IaaS infrastructure services, PaaS platform services, and SaaS software services."
+        )
+        XCTAssertEqual(
+            normalizer.normalize("The bird built a nest near the cloud."),
+            "The bird built a nest near the cloud."
+        )
+        XCTAssertEqual(
+            normalizer.normalize("Please pass the cloud computing exam."),
+            "Please pass the Cloud Computing exam."
+        )
+        XCTAssertEqual(normalizer.normalize("This is important."), "This is important.")
+        XCTAssertEqual(
+            normalizer.normalize("IS is one cloud service label in this broken transcript."),
+            "IS is one cloud service label in this broken transcript."
+        )
+    }
+
+    func testIndianEnglishAliasesRemainDisabledWithoutAccentProfile() {
+        let normalizer = TranscriptTermNormalizer(
+            course: Course(
+                name: "Cloud Computing",
+                recognitionTerms: ["NIST", "IaaS"]
+            ),
+            approvedTerms: []
+        )
+
+        XCTAssertEqual(
+            normalizer.normalize("NISC security framework and eye as cloud service."),
+            "NISC security framework and eye as cloud service."
         )
     }
 
@@ -750,6 +924,116 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertEqual(snapshot.finalSegments.first?.translatedText, "英文字幕不应被翻译阻塞。")
     }
 
+    func testPipelineKeepsChineseDiscussionButExcludesItFromTranslationContext() async {
+        let engine = RecordingTranslationEngine(prefix: "译文")
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Software Architecture"),
+            translationEngine: engine
+        )
+
+        await pipeline.consume(
+            .final(
+                id: UUID(),
+                text: "这个作业什么时候交？",
+                startTime: 0,
+                endTime: 2,
+                speaker: nil,
+                provider: "test"
+            )
+        )
+        await pipeline.consume(
+            .final(
+                id: UUID(),
+                text: "The assignment is due on Friday.",
+                startTime: 2,
+                endTime: 4,
+                speaker: nil,
+                provider: "test"
+            )
+        )
+        _ = await pipeline.finishPendingTranslations(timeout: .seconds(1))
+
+        let snapshot = await pipeline.currentSnapshot()
+        let contexts = await engine.contexts
+        XCTAssertEqual(snapshot.finalSegments.count, 2)
+        XCTAssertNil(snapshot.finalSegments[0].translatedText)
+        XCTAssertNotNil(snapshot.finalSegments[0].translationExclusionReason)
+        XCTAssertEqual(snapshot.finalSegments[0].state, .final)
+        XCTAssertEqual(snapshot.finalSegments[1].translatedText, "译文：The assignment is due on Friday.")
+        XCTAssertEqual(snapshot.finalSegments[1].translationProvider, engine.identifier)
+        XCTAssertTrue(contexts.allSatisfy { context in
+            !context.recentSourceText.contains("这个作业什么时候交？")
+        })
+    }
+
+    func testPipelineUsesSonioxTranslationWithoutCallingLocalEngine() async {
+        let engine = RecordingTranslationEngine(prefix: "本地")
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Cloud Computing"),
+            translationEngine: engine
+        )
+        let result = BilingualRecognitionResult(
+            id: UUID(),
+            sourceText: "The assignment is due on Friday.",
+            translatedText: "作业周五截止。",
+            sourceLanguage: "en",
+            startTime: 0,
+            endTime: 3,
+            speaker: "1",
+            recognitionProvider: "soniox-stt-rt-v5",
+            translationProvider: "soniox-translation-stt-rt-v5"
+        )
+
+        await pipeline.consume(.bilingualProvisional(result))
+        var snapshot = await pipeline.currentSnapshot()
+        XCTAssertEqual(snapshot.provisionalSegment?.translatedText, "作业周五截止。")
+
+        await pipeline.consume(.bilingualFinal(result))
+        _ = await pipeline.finishPendingTranslations(timeout: .milliseconds(100))
+        snapshot = await pipeline.currentSnapshot()
+        let contexts = await engine.contexts
+
+        XCTAssertEqual(snapshot.finalSegments.first?.sourceText, result.sourceText)
+        XCTAssertEqual(snapshot.finalSegments.first?.translatedText, result.translatedText)
+        XCTAssertEqual(
+            snapshot.finalSegments.first?.translationProvider,
+            result.translationProvider
+        )
+        XCTAssertEqual(snapshot.finalSegments.first?.sourceLanguage, "en")
+        XCTAssertTrue(contexts.isEmpty)
+    }
+
+    func testPipelineExcludesSonioxChineseSourceEvenWithoutHanCharacters() async {
+        let engine = RecordingTranslationEngine(prefix: "本地")
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Cloud Computing"),
+            translationEngine: engine
+        )
+
+        await pipeline.consume(
+            .bilingualFinal(
+                BilingualRecognitionResult(
+                    id: UUID(),
+                    sourceText: "OK?",
+                    translatedText: "好吗？",
+                    sourceLanguage: "zh",
+                    startTime: 0,
+                    endTime: 1,
+                    recognitionProvider: "soniox-stt-rt-v5",
+                    translationProvider: "soniox-translation-stt-rt-v5"
+                )
+            )
+        )
+
+        let snapshot = await pipeline.currentSnapshot()
+        let contexts = await engine.contexts
+        XCTAssertEqual(snapshot.finalSegments.first?.sourceText, "OK?")
+        XCTAssertNil(snapshot.finalSegments.first?.translatedText)
+        XCTAssertNotNil(snapshot.finalSegments.first?.translationExclusionReason)
+        XCTAssertEqual(snapshot.finalSegments.first?.sourceLanguage, "zh")
+        XCTAssertTrue(contexts.isEmpty)
+    }
+
     func testPipelineReplacesPrimaryTranslationWithRefinedTranslation() async {
         let pipeline = SubtitlePipeline(
             course: Course(name: "Software Architecture"),
@@ -776,6 +1060,140 @@ final class LingoSlateCoreTests: XCTestCase {
             snapshot.finalSegments.first?.translatedText,
             "精译：The event loop schedules callbacks."
         )
+        XCTAssertEqual(
+            snapshot.finalSegments.first?.translationProvider,
+            "refinement-test"
+        )
+    }
+
+    func testPipelineContextuallyRetranslatesTheLatestThreeLiveSegments() async {
+        let primary = RecordingTranslationEngine(prefix: "快译")
+        let refinement = RecordingTranslationEngine(prefix: "精译")
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Cloud Computing"),
+            translationEngine: StagedTranslationEngine(
+                primary: primary,
+                refinement: refinement,
+                refinementPolicy: .contextualAndPostClass
+            )
+        )
+
+        for index in 0..<3 {
+            await pipeline.consume(
+                .final(
+                    id: UUID(),
+                    text: "Sentence \(index + 1).",
+                    startTime: Double(index),
+                    endTime: Double(index + 1),
+                    speaker: nil,
+                    provider: "test"
+                )
+            )
+        }
+        _ = await pipeline.finishPendingTranslations(timeout: .seconds(1))
+
+        let primaryContexts = await primary.contexts
+        let refinementContexts = await refinement.contexts
+        let snapshot = await pipeline.currentSnapshot()
+        XCTAssertGreaterThanOrEqual(primaryContexts.count, 3)
+        XCTAssertLessThanOrEqual(primaryContexts.count, 5)
+        XCTAssertEqual(refinementContexts.count, 3)
+        XCTAssertTrue(refinementContexts.allSatisfy { $0.phase == .contextualLive })
+        XCTAssertEqual(
+            Set(refinementContexts.map(\.recentSourceText)),
+            Set([
+                ["Sentence 2.", "Sentence 3."],
+                ["Sentence 1.", "Sentence 3."],
+                ["Sentence 1.", "Sentence 2."],
+            ])
+        )
+        XCTAssertEqual(snapshot.finalSegments.first?.translatedText, "精译：Sentence 1.")
+        XCTAssertEqual(snapshot.finalSegments.last?.translatedText, "精译：Sentence 3.")
+    }
+
+    func testContextualRetranslationWaitsForPendingQuickTranslations() async {
+        let primary = DeferredTranslationEngine()
+        let refinement = RecordingTranslationEngine(prefix: "精译")
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Cloud Computing"),
+            translationEngine: StagedTranslationEngine(
+                primary: primary,
+                refinement: refinement,
+                refinementPolicy: .contextualAndPostClass
+            ),
+            maximumPendingTranslations: 1
+        )
+
+        for index in 0..<3 {
+            await pipeline.consume(
+                .final(
+                    id: UUID(),
+                    text: "Sentence \(index + 1).",
+                    startTime: Double(index),
+                    endTime: Double(index + 1),
+                    speaker: nil,
+                    provider: "test"
+                )
+            )
+        }
+        for index in 0..<5 {
+            primary.complete(with: "快译 \(index)")
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        let completed = await pipeline.finishPendingTranslations(timeout: .seconds(1))
+        let snapshot = await pipeline.currentSnapshot()
+        let refinementContexts = await refinement.contexts
+
+        XCTAssertTrue(completed)
+        XCTAssertEqual(refinementContexts.count, 3)
+        XCTAssertEqual(
+            snapshot.finalSegments.compactMap(\.translatedText),
+            ["精译：Sentence 1.", "精译：Sentence 2.", "精译：Sentence 3."]
+        )
+    }
+
+    func testCorrectedEnglishIsRetranslatedAndLearnedForSession() async {
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Cloud Computing"),
+            translationEngine: StagedTranslationEngine(
+                primary: TestTranslationEngine(),
+                refinement: RefinementTranslationEngine(),
+                refinementPolicy: .contextualAndPostClass
+            )
+        )
+        let firstID = UUID()
+        await pipeline.consume(
+            .final(
+                id: firstID,
+                text: "Use eye as cloud service.",
+                startTime: 0,
+                endTime: 1,
+                speaker: nil,
+                provider: "test"
+            )
+        )
+        _ = await pipeline.finishPendingTranslations(timeout: .seconds(1))
+
+        await pipeline.correctSegment(id: firstID, sourceText: "Use IaaS cloud service.")
+        _ = await pipeline.finishPendingTranslations(timeout: .seconds(1))
+        await pipeline.consume(
+            .final(
+                id: UUID(),
+                text: "Use eye as cloud service.",
+                startTime: 1,
+                endTime: 2,
+                speaker: nil,
+                provider: "test"
+            )
+        )
+        _ = await pipeline.finishPendingTranslations(timeout: .seconds(1))
+
+        let snapshot = await pipeline.currentSnapshot()
+        XCTAssertEqual(snapshot.finalSegments[0].sourceText, "Use IaaS cloud service.")
+        XCTAssertEqual(snapshot.finalSegments[0].translatedText, "精译：Use IaaS cloud service.")
+        XCTAssertTrue(snapshot.finalSegments[0].isUserCorrected)
+        XCTAssertEqual(snapshot.finalSegments[1].sourceText, "Use IaaS cloud service.")
     }
 
     func testPipelineKeepsPrimaryTranslationWhenRefinementFailsQualityCheck() async {
@@ -804,6 +1222,8 @@ final class LingoSlateCoreTests: XCTestCase {
             snapshot.finalSegments.first?.translatedText,
             "译文：Each paper is worth 15 credits."
         )
+        XCTAssertEqual(snapshot.finalSegments.first?.translationProvider, "test")
+        XCTAssertNotNil(snapshot.finalSegments.first?.translationFailureReason)
     }
 
     func testPipelineUsesRefinementWhenPrimaryTranslationFails() async {
@@ -869,6 +1289,26 @@ final class LingoSlateCoreTests: XCTestCase {
             "One two three four. Five six seven eight."
         )
         XCTAssertTrue(snapshot.finalSegments.allSatisfy { $0.state == .translated })
+    }
+
+    func testPipelinePreservesOfflineRecognitionBoundaries() async {
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Timing"),
+            translationEngine: TestTranslationEngine()
+        )
+
+        let replaced = await pipeline.replaceFinalTranscript(
+            with: [
+                TimedTranscriptChunk(text: "First concept.", startTime: 1.5, endTime: 4),
+                TimedTranscriptChunk(text: "Second concept.", startTime: 9, endTime: 12.5),
+            ],
+            provider: "offline"
+        )
+        let snapshot = await pipeline.currentSnapshot()
+
+        XCTAssertTrue(replaced)
+        XCTAssertEqual(snapshot.finalSegments.map(\.startTime), [1.5, 9])
+        XCTAssertEqual(snapshot.finalSegments.map(\.endTime), [4, 12.5])
     }
 
     func testPipelineSplitsLongOfflineSentenceAtClauseBoundaries() async {
@@ -974,6 +1414,132 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertTrue(emptySummary.isEmpty)
     }
 
+    func testDeterministicSummaryDoesNotTreatExampleAsActionItem() async throws {
+        let document = SessionDocument(
+            configuration: SessionConfiguration(course: Course(name: "Cloud Computing")),
+            segments: [
+                TranscriptSegment(
+                    startTime: 0,
+                    endTime: 4,
+                    sourceText: "For example, S3 provides object storage.",
+                    state: .final,
+                    provider: "test"
+                ),
+            ]
+        )
+
+        let summary = try await DeterministicSummaryEngine().summarize(document)
+
+        XCTAssertTrue(summary.actionItems.isEmpty)
+    }
+
+    func testDeterministicSummaryExcludesChineseDiscussion() async throws {
+        let document = SessionDocument(
+            configuration: SessionConfiguration(course: Course(name: "Cloud Computing")),
+            segments: [
+                TranscriptSegment(
+                    startTime: 0,
+                    endTime: 2,
+                    sourceText: "这个作业很难。",
+                    state: .final,
+                    provider: "test",
+                    translationExclusionReason: "detectedChineseDiscussion"
+                ),
+                TranscriptSegment(
+                    startTime: 2,
+                    endTime: 4,
+                    sourceText: "The assignment is due on Friday.",
+                    translatedText: "作业周五截止。",
+                    state: .translated,
+                    provider: "test"
+                ),
+            ]
+        )
+
+        let summary = try await DeterministicSummaryEngine().summarize(document)
+
+        XCTAssertFalse(summary.overview.contains(where: { $0.contains("很难") }))
+        XCTAssertTrue(summary.overview.contains("作业周五截止。"))
+    }
+
+    func testPipelineTranslationDeadlineCancelsHungWork() async {
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Concurrency"),
+            translationEngine: DeferredTranslationEngine()
+        )
+        await pipeline.consume(
+            .final(
+                id: UUID(),
+                text: "This translation never completes.",
+                startTime: 0,
+                endTime: 2,
+                speaker: nil,
+                provider: "test"
+            )
+        )
+
+        let clock = ContinuousClock()
+        let started = clock.now
+        let completed = await pipeline.finishPendingTranslations(timeout: .milliseconds(100))
+
+        XCTAssertFalse(completed)
+        XCTAssertLessThan(started.duration(to: clock.now), .seconds(1))
+    }
+
+    func testPipelineDrainsDeferredTranslationsWithinBound() async {
+        let engine = DeferredTranslationEngine()
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Concurrency"),
+            translationEngine: engine,
+            maximumPendingTranslations: 1
+        )
+        for index in 0..<3 {
+            await pipeline.consume(
+                .final(
+                    id: UUID(),
+                    text: "Segment \(index)",
+                    startTime: Double(index),
+                    endTime: Double(index + 1),
+                    speaker: nil,
+                    provider: "test"
+                )
+            )
+        }
+
+        for index in 0..<3 {
+            engine.complete(with: "译文 \(index)")
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        let completed = await pipeline.finishPendingTranslations(timeout: .seconds(1))
+        let snapshot = await pipeline.currentSnapshot()
+
+        XCTAssertTrue(completed)
+        XCTAssertEqual(snapshot.finalSegments.compactMap(\.translatedText).count, 3)
+    }
+
+    func testPipelineRetranslatesPreviouslyFailedSegments() async {
+        let pipeline = SubtitlePipeline(
+            course: Course(name: "Resilience"),
+            translationEngine: FlakyTranslationEngine()
+        )
+        await pipeline.consume(
+            .final(
+                id: UUID(),
+                text: "Retry this segment.",
+                startTime: 0,
+                endTime: 2,
+                speaker: nil,
+                provider: "test"
+            )
+        )
+        _ = await pipeline.finishPendingTranslations(timeout: .seconds(1))
+        await pipeline.retranslateMissing()
+        _ = await pipeline.finishPendingTranslations(timeout: .seconds(1))
+
+        let snapshot = await pipeline.currentSnapshot()
+        XCTAssertEqual(snapshot.finalSegments.first?.translatedText, "重试成功")
+    }
+
     func testSessionStoreRoundTrip() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("LingoSlateTests-\(UUID().uuidString)")
@@ -992,7 +1558,9 @@ final class LingoSlateCoreTests: XCTestCase {
                     sourceText: "Transactions provide atomicity.",
                     translatedText: "事务提供原子性。",
                     state: .translated,
-                    provider: "test"
+                    provider: "test",
+                    translationProvider: "translategemma-4b",
+                    sourceLanguage: "en"
                 )
             ],
             summary: SessionSummary(
@@ -1009,6 +1577,14 @@ final class LingoSlateCoreTests: XCTestCase {
                 generatedTermCount: 0,
                 terms: ["Transactions"],
                 prewarmedRecognitionReused: true
+            ),
+            audioCaptureDiagnostics: AudioCaptureDiagnostics(
+                inputDeviceName: "MacBook Microphone",
+                inputDeviceUID: "test-device",
+                inputSampleRate: 48_000,
+                recognitionDroppedFrameCount: 2,
+                recordingDroppedFrameCount: 0,
+                routeChangeCount: 1
             )
         )
 
@@ -1021,10 +1597,13 @@ final class LingoSlateCoreTests: XCTestCase {
         XCTAssertEqual(loaded.segments, document.segments)
         XCTAssertEqual(loaded.segments.first?.sourceText, "Transactions provide atomicity.")
         XCTAssertEqual(loaded.segments.first?.translatedText, "事务提供原子性。")
+        XCTAssertEqual(loaded.segments.first?.translationProvider, "translategemma-4b")
+        XCTAssertEqual(loaded.segments.first?.sourceLanguage, "en")
         XCTAssertEqual(loaded.configuration.audioRetention, .keep)
         XCTAssertEqual(loaded.audioFileName, "session.m4a")
         XCTAssertEqual(loaded.markers, document.markers)
         XCTAssertEqual(loaded.summary, document.summary)
+        XCTAssertEqual(loaded.audioCaptureDiagnostics, document.audioCaptureDiagnostics)
         let loadedPreparation = try XCTUnwrap(loaded.preparationDiagnostics)
         let expectedPreparation = try XCTUnwrap(document.preparationDiagnostics)
         XCTAssertEqual(loadedPreparation.asrModelReady, expectedPreparation.asrModelReady)
@@ -1053,6 +1632,70 @@ final class LingoSlateCoreTests: XCTestCase {
             ["\(document.id.uuidString).json"]
         )
     }
+
+    func testSessionStoreDeleteRemovesDocumentAndOwnedAudio() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LingoSlateSessionDelete-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let store = SessionStore(directoryURL: directory)
+        let document = SessionDocument(
+            configuration: SessionConfiguration(course: Course(name: "Cloud Computing")),
+            audioFileName: "lecture.m4a"
+        )
+        let audioURL = directory.appendingPathComponent("lecture.m4a")
+        let unrelatedURL = directory.appendingPathComponent("keep.txt")
+        try Data([1, 2, 3]).write(to: audioURL)
+        try Data([4, 5, 6]).write(to: unrelatedURL)
+        try await store.save(document)
+
+        try await store.delete(id: document.id)
+
+        let remaining = try await store.list()
+        XCTAssertTrue(remaining.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audioURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unrelatedURL.path))
+    }
+
+    func testSessionStoreSkipsCorruptFilesAndDecodesLegacyDocument() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LingoSlateStoreCompatibility-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SessionStore(directoryURL: directory)
+        let document = SessionDocument(
+            configuration: SessionConfiguration(course: Course(name: "Legacy"))
+        )
+        try await store.save(document)
+
+        let documentURL = directory.appendingPathComponent("\(document.id.uuidString).json")
+        let data = try Data(contentsOf: documentURL)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        object["schemaVersion"] = nil
+        object["processedAt"] = nil
+        object["failureMessage"] = nil
+        object["isPostProcessingComplete"] = nil
+        object["audioCaptureDiagnostics"] = nil
+        try JSONSerialization.data(withJSONObject: object)
+            .write(to: documentURL, options: .atomic)
+        try Data("not-json".utf8).write(
+            to: directory.appendingPathComponent("corrupt.json")
+        )
+
+        let loaded = try await store.load(id: document.id)
+        let listed = try await store.list()
+
+        XCTAssertNil(loaded.schemaVersion)
+        XCTAssertNil(loaded.processedAt)
+        XCTAssertNil(loaded.failureMessage)
+        XCTAssertNil(loaded.isPostProcessingComplete)
+        XCTAssertNil(loaded.audioCaptureDiagnostics)
+        XCTAssertEqual(listed.map(\.id), [document.id])
+    }
 }
 
 private struct TestTranslationEngine: TranslationEngine {
@@ -1060,6 +1703,21 @@ private struct TestTranslationEngine: TranslationEngine {
 
     func translate(_ text: String, context: TranslationContext) async throws -> String {
         "译文：\(text)"
+    }
+}
+
+private actor RecordingTranslationEngine: TranslationEngine {
+    nonisolated let identifier = "recording-translation"
+    private let prefix: String
+    private(set) var contexts: [TranslationContext] = []
+
+    init(prefix: String) {
+        self.prefix = prefix
+    }
+
+    func translate(_ text: String, context: TranslationContext) async throws -> String {
+        contexts.append(context)
+        return "\(prefix)：\(text)"
     }
 }
 
@@ -1108,6 +1766,19 @@ private struct FailingTranslationEngine: TranslationEngine {
 
 private enum TestTranslationError: Error {
     case unavailable
+}
+
+private actor FlakyTranslationEngine: TranslationEngine {
+    nonisolated let identifier = "flaky"
+    private var attempts = 0
+
+    func translate(_ text: String, context: TranslationContext) async throws -> String {
+        attempts += 1
+        if attempts == 1 {
+            throw TestTranslationError.unavailable
+        }
+        return "重试成功"
+    }
 }
 
 private final class DeferredTranslationEngine: TranslationEngine, @unchecked Sendable {

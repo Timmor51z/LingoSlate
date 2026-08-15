@@ -30,6 +30,19 @@ public actor SessionStateMachine {
         state = newState
     }
 
+    @discardableResult
+    public func beginFinalizing() throws -> Bool {
+        switch state {
+        case .running, .paused:
+            state = .finalizing
+            return true
+        case .finalizing, .completed:
+            return false
+        default:
+            throw SessionTransitionError.invalidTransition(from: state, to: .finalizing)
+        }
+    }
+
     private static func canTransition(
         from current: SessionLifecycleState,
         to next: SessionLifecycleState

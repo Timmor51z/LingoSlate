@@ -73,4 +73,42 @@ final class LocalSummaryEngineTests: XCTestCase {
             try pngData.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
         }
     }
+
+    @MainActor
+    func testWorkspaceRendersAtCompactWidth() throws {
+        let suiteName = "LingoSlateWorkspaceLayoutTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let profileStore = UserProfileStore(
+            defaults: defaults,
+            storageKey: "test.profile",
+            legacyStorageKeys: [],
+            legacyBundleIdentifiers: [],
+            defaultRegionCode: "NZ"
+        )
+        let renderer = ImageRenderer(
+            content: ClassroomWorkspaceView(
+                profileStore: profileStore,
+                sonioxCredentialStore: SonioxCredentialStore()
+            )
+            .frame(width: 760, height: 520)
+            .background(Color(nsColor: .windowBackgroundColor))
+        )
+        renderer.scale = 2
+
+        let image = try XCTUnwrap(renderer.nsImage)
+        let tiffData = try XCTUnwrap(image.tiffRepresentation)
+        let representation = try XCTUnwrap(NSBitmapImageRep(data: tiffData))
+        let pngData = try XCTUnwrap(
+            representation.representation(using: .png, properties: [:])
+        )
+
+        XCTAssertEqual(image.size.width, 760, accuracy: 0.5)
+        XCTAssertEqual(image.size.height, 520, accuracy: 0.5)
+        XCTAssertGreaterThan(pngData.count, 10_000)
+
+        if let outputPath = ProcessInfo.processInfo.environment["LINGOSLATE_WORKSPACE_SNAPSHOT"] {
+            try pngData.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
+        }
+    }
 }

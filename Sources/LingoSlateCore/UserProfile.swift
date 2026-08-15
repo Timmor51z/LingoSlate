@@ -131,6 +131,15 @@ public enum CourseTermSeedBuilder {
         "AWS",
         "Azure",
         "Google Cloud",
+        "IaaS",
+        "PaaS",
+        "SaaS",
+        "NIST",
+        "EC2",
+        "S3",
+        "CloudTrail",
+        "Lambda",
+        "SageMaker",
         "IAM",
         "MFA",
         "OAuth",
@@ -159,6 +168,18 @@ public enum CourseTermSeedBuilder {
         "integration testing",
         "software architecture",
         "deployment pipeline",
+    ]
+
+    private static let mobileTerms = [
+        "Android Studio",
+        "Jetpack Compose",
+        "Kotlin",
+        "XML",
+        "Android Manifest",
+        "Activity",
+        "Composable",
+        "emulator",
+        "runtime permission",
     ]
 
     public static func suggestions(
@@ -207,6 +228,9 @@ public enum CourseTermSeedBuilder {
             .contains(where: lowercaseCourseName.contains) {
             candidates.append(contentsOf: softwareTerms)
         }
+        if ["mobile", "wearable", "android"].contains(where: lowercaseCourseName.contains) {
+            candidates.append(contentsOf: mobileTerms)
+        }
 
         var seen: Set<String> = []
         return candidates.compactMap { candidate in
@@ -227,6 +251,14 @@ public enum RegionalAcademicGlossary {
             term("IEEE", "IEEE", aliases: ["I triple E"]),
             term("ACM", "ACM", aliases: ["A C M"]),
             term("Scopus", "Scopus", aliases: ["Scope us"]),
+            term("LLM", "LLM", aliases: ["LLMs", "LLEM", "LLEMs"]),
+            term("ChatGPT", "ChatGPT"),
+            term("DeepSeek", "DeepSeek", aliases: ["Deep Seek"]),
+            term("Claude Code", "Claude Code"),
+            term("Android Studio", "Android Studio"),
+            term("Jetpack Compose", "Jetpack Compose", aliases: ["Jet Pack Compose"]),
+            term("Kotlin", "Kotlin", aliases: ["Scotlin"]),
+            term("XML", "XML"),
             term("peer evaluation", "同伴互评", aliases: ["peer assessment"]),
             term("in-text citation", "文内引用", aliases: ["in text citation"]),
             term("deduction of marks", "扣分", aliases: ["mark deduction"]),
@@ -267,6 +299,44 @@ public enum RegionalAcademicGlossary {
             aliases: aliases,
             origin: .officialCourseSource,
             confidence: 0.9,
+            isApproved: true
+        )
+    }
+}
+
+public enum CourseTranslationGlossary {
+    public static func approvedTerms(for course: Course) -> [GlossaryTerm] {
+        let context = ([course.name] + (course.recognitionTerms ?? []))
+            .joined(separator: " ")
+            .lowercased()
+        guard ["cloud", "aws", "azure", "iaas", "paas", "saas", "nist"]
+            .contains(where: context.contains) else { return [] }
+
+        return [
+            term("NIST", "NIST"),
+            term("CloudTrail", "CloudTrail", aliases: ["AWS CloudTrail"]),
+            term("cloud consumer", "云服务消费者", aliases: ["cloud consumers"]),
+            term(
+                "cloud service provider",
+                "云服务提供商",
+                aliases: ["cloud service providers", "cloud provider", "cloud providers"]
+            ),
+            term("cloud auditor", "云服务审计方", aliases: ["cloud auditors"]),
+            term("cloud broker", "云服务经纪商", aliases: ["cloud brokers"]),
+            term("security group", "安全组", aliases: ["security groups"]),
+        ]
+    }
+
+    private static func term(
+        _ source: String,
+        _ target: String,
+        aliases: [String] = []
+    ) -> GlossaryTerm {
+        GlossaryTerm(
+            source: source,
+            target: target,
+            aliases: aliases,
+            origin: .sessionSuggestion,
             isApproved: true
         )
     }

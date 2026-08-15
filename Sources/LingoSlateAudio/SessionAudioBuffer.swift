@@ -36,6 +36,37 @@ public actor SessionAudioBuffer {
 
     public init() {}
 
+    public nonisolated static func recoverStaleRecordings(
+        in directoryURL: URL,
+        fileManager: FileManager = .default
+    ) -> [URL] {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: nil,
+            options: []
+        ) else { return [] }
+
+        var recovered: [URL] = []
+        for temporaryURL in files where temporaryURL.pathExtension == "m4a" {
+            let name = temporaryURL.deletingPathExtension().lastPathComponent
+            guard name.first == ".", name.count > 37 else { continue }
+            let start = name.index(after: name.startIndex)
+            let end = name.index(start, offsetBy: 36)
+            let sessionID = String(name[start..<end])
+            guard UUID(uuidString: sessionID) != nil else { continue }
+
+            let destinationURL = directoryURL.appendingPathComponent("\(sessionID).m4a")
+            guard !fileManager.fileExists(atPath: destinationURL.path),
+                  let file = try? AVAudioFile(forReading: temporaryURL),
+                  file.length > 0,
+                  (try? fileManager.moveItem(at: temporaryURL, to: destinationURL)) != nil else {
+                continue
+            }
+            recovered.append(destinationURL)
+        }
+        return recovered
+    }
+
     public var isEmpty: Bool {
         sampleCount == 0
     }

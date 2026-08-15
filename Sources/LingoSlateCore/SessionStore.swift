@@ -45,10 +45,22 @@ public actor SessionStore {
             )
             .filter { $0.pathExtension == "json" }
             .compactMap { url in
-                let data = try Data(contentsOf: url)
-                return try decoder.decode(SessionDocument.self, from: data)
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return try? decoder.decode(SessionDocument.self, from: data)
             }
             .sorted { $0.startedAt > $1.startedAt }
+    }
+
+    public func delete(id: UUID) throws {
+        let document = try load(id: id)
+        try FileManager.default.removeItem(at: fileURL(for: id))
+
+        guard let audioFileName = document.audioFileName,
+              URL(fileURLWithPath: audioFileName).lastPathComponent == audioFileName else {
+            return
+        }
+        let audioURL = directoryURL.appendingPathComponent(audioFileName)
+        try? FileManager.default.removeItem(at: audioURL)
     }
 
     private func fileURL(for id: UUID) -> URL {

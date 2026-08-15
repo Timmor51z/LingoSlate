@@ -4,16 +4,23 @@ import SwiftUI
 @main
 struct LingoSlateMacApp: App {
     @StateObject private var profileStore = UserProfileStore()
+    @StateObject private var sonioxCredentialStore = SonioxCredentialStore()
 
     var body: some Scene {
         WindowGroup {
-            ClassroomWorkspaceView(profileStore: profileStore)
+            ClassroomWorkspaceView(
+                profileStore: profileStore,
+                sonioxCredentialStore: sonioxCredentialStore
+            )
         }
-        .defaultSize(width: 1_080, height: 720)
+        .defaultSize(width: 1_000, height: 680)
         .windowResizability(.contentMinSize)
 
         Settings {
-            UserProfileSettingsView(profileStore: profileStore)
+            UserProfileSettingsView(
+                profileStore: profileStore,
+                sonioxCredentialStore: sonioxCredentialStore
+            )
         }
     }
 }

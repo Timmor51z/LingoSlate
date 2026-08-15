@@ -75,7 +75,9 @@ struct LocalSummaryEngine: SummaryEngine {
         SessionSummary(
             overview: generated.overview.isEmpty ? fallback.overview : generated.overview,
             keyConcepts: Self.clean(generated.keyConcepts + fallback.keyConcepts, limit: 8),
-            actionItems: Self.clean(generated.actionItems + fallback.actionItems, limit: 8)
+            actionItems: generated.actionItems.isEmpty
+                ? fallback.actionItems
+                : generated.actionItems
         )
     }
 
@@ -103,7 +105,9 @@ enum SummaryPromptBuilder {
         maximumCharacters: Int = 14_000,
         maximumSegments: Int = 80
     ) -> String {
-        let segments = document.segments.sorted { $0.startTime < $1.startTime }
+        let segments = document.segments
+            .filter { $0.translationExclusionReason == nil }
+            .sorted { $0.startTime < $1.startTime }
         let selectedSegments = evenlySampled(segments, limit: maximumSegments)
         var lines: [String] = []
         var characterCount = 0

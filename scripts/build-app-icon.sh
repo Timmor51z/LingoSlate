@@ -3,11 +3,12 @@
 set -euo pipefail
 
 ROOT_DIR="${0:A:h:h}"
-SOURCE_ICON="$ROOT_DIR/Resources/LingoSlate-AppIcon.png"
-ICON_WORK_DIR="$ROOT_DIR/.build/LingoSlateIcon"
+SOURCE_ICON="$ROOT_DIR/Resources/LingoSlate-AppIcon-v2.png"
 OUTPUT_ICON="$ROOT_DIR/.build/LingoSlate.icns"
+ICON_WORK_DIR="$(mktemp -d /private/tmp/LingoSlateIcon.XXXXXX)"
 
-mkdir -p "$ICON_WORK_DIR"
+trap 'rm -rf "$ICON_WORK_DIR"' EXIT
+mkdir -p "${OUTPUT_ICON:h}"
 
 resize_icon() {
     local size="$1"
@@ -28,5 +29,6 @@ tiffutil -catnosizecheck \
     "$ICON_WORK_DIR/icon_512.tiff" \
     "$ICON_WORK_DIR/icon_1024.tiff" \
     -out "$ICON_WORK_DIR/LingoSlate.tiff" >/dev/null
-tiff2icns "$ICON_WORK_DIR/LingoSlate.tiff" "$OUTPUT_ICON"
+tiff2icns "$ICON_WORK_DIR/LingoSlate.tiff" "$ICON_WORK_DIR/LingoSlate.icns"
+cp "$ICON_WORK_DIR/LingoSlate.icns" "$OUTPUT_ICON"
 echo "$OUTPUT_ICON"

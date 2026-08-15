@@ -9,6 +9,8 @@ The benchmark compares LingoSlate and LecSync on the same audio. It is designed 
 - Both directories are ignored by Git.
 - The importer removes `userId`, signed audio URLs, raw cache metadata, and account fields from the reference JSON.
 - Never move private benchmark artifacts into a tracked fixture directory.
+- A Soniox benchmark uploads the selected private audio range and prepared course terms to Soniox.
+  Run it only when the recording participants and your data policy permit cloud processing.
 
 ## Prepare a LecSync session
 
@@ -38,7 +40,28 @@ swift run LingoSlateBenchmark \
   BenchmarkResults/Private/<session-id>/report.json
 ```
 
-Available model values are `eou120m`, `unified640`, `unified1120`, `unifiedOffline`, and `nemotron1120`. Audio values are `raw` and `adaptive`. High-accuracy models download their private local Core ML assets on first use. The offline model buffers the complete audio and emits its transcript only at finish.
+Available model values are `eou120m`, `unified640`, `unified1120`, `unifiedOffline`, `nemotron1120`, and `soniox`. Audio values are `raw` and `adaptive`. High-accuracy models download their private local Core ML assets on first use. The offline model buffers the complete audio and emits its transcript only at finish.
+
+After saving a Soniox key in LingoSlate settings, run a representative cloud A/B range without
+placing the secret in shell history:
+
+```bash
+SONIOX_API_KEY="$(security find-generic-password -w \
+  -s com.timmorzhu.LingoSlate.soniox -a api-key)" \
+swift run LingoSlateBenchmark \
+  --model soniox \
+  --audio raw \
+  --term Moodle \
+  --start-seconds 0 \
+  --duration-seconds 600 \
+  Benchmarks/Private/<session-id>/reference.json \
+  Benchmarks/Private/<session-id>/audio-16k.wav \
+  BenchmarkResults/Private/<session-id>/soniox-first-10m.json
+```
+
+The Soniox runner deliberately sends audio at realtime speed so the same WebSocket path is tested
+as a live class. A 10-minute range therefore takes about 10 minutes and consumes paid Soniox usage.
+The `--term` option may be repeated; terms are supplied as recognition context, not as forced text.
 
 Use a source range to isolate difficult material such as distant student questions without
 creating a second reference file:
@@ -91,6 +114,37 @@ realtime for Unified 1120 ms and 16.28% at 72.36x realtime for Unified offline. 
 half-point movement does not change the product decision. The repeat also confirmed that the
 competitor transcript contains errors such as `STEAM` for spoken `STEM`, so these figures must
 remain agreement diagnostics rather than advertised WER.
+
+### Soniox stratified A/B
+
+A July 21 cloud A/B used the same recording, reference, raw 16 kHz audio, and prepared course
+context. It sampled the first 10 minutes of lecturer-led material and the final 15 minutes 57
+seconds of audience questions. Soniox was paced at realtime speed through the production WebSocket
+path; local modes processed the exact same source ranges.
+
+| Source range | Soniox `stt-rt-v5` | Unified 1120 ms live | Unified offline 15 s |
+| --- | ---: | ---: | ---: |
+| First 10 minutes | **8.88%** | 13.17% | 12.69% |
+| Final 15 minutes 57 seconds | **16.04%** | 27.99% | 24.30% |
+| Combined weighted result | **12.94%** | 21.57% | 19.27% |
+
+Across the two ranges, Soniox reduced agreement errors by 40.0% relative to the local live path
+and 32.8% relative to the local offline path. Its normalized word recall was 91.90%, versus 83.45%
+live and 84.45% offline; precision remained comparable at 94.10%, 93.28%, and 94.43%. Number recall
+was 81.48% for Soniox, 48.15% live, and 66.67% offline. The main gain is therefore recovered speech,
+not a large increase in speculative words.
+
+Manual review also found cases where the numeric agreement score understates Soniox quality. With
+course context, Soniox retained `MyWaikato` and `University of Waikato`, while the competitor
+reference rendered them as `My Way Kato` and `University of Vancouver`. Remaining Soniox errors
+include `lab book` for `lab coat` and imperfect distant student questions, so course terms and good
+microphone placement still matter.
+
+This evidence supports Soniox as the optional high-quality live recognition mode while keeping
+translation, summaries, recordings, and session documents local. The local modes remain the
+offline and zero-usage-cost fallback. These are still competitor-agreement diagnostics rather than
+ground-truth WER; a manually corrected stratified reference is required before publishing accuracy
+claims.
 
 ### Distant student questions
 
@@ -163,11 +217,17 @@ cp .build/mlx-metal/mlx.metallib \
 LINGOSLATE_TRANSLATION_MODEL_PATH=/path/to/translategemma-snapshot \
   .build/arm64-apple-macosx/debug/LingoSlateTranslationBenchmark \
   --sample-count 24 \
+  --context none \
   --term Moodle \
   --glossary "paper outline=课程大纲" \
   Benchmarks/Private/<session-id>/reference.json \
   BenchmarkResults/Private/<session-id>/translation-report.json
 ```
+
+Repeat the same command with `--context recent` and a different report path. Context mode uses
+the four actual source segments immediately preceding each sampled segment, not the preceding
+widely spaced benchmark sample. Compare latency, number/term retention, character diagnostics,
+and the saved candidate translations; bilingual review remains the semantic quality gate.
 
 The report records model loading and per-segment latency, a local character n-gram F-score,
 number recall, protected-term recall, glossary-target recall, and every candidate/reference pair. Character overlap is
@@ -182,3 +242,26 @@ Reviewed `paper outline`, lab-attendance, and tutorial-priority examples improve
 replacements such as `paper=课程` and `lab=实验课` were rejected because they damaged valid
 phrases such as `submit my paper` and `lab coat`. Production also rejects a refined result that
 loses a protected name or number, leaving the immediate Apple translation visible instead.
+
+## Soniox bilingual context spike
+
+A July 22, 2026 smoke test replayed the same first 120 seconds of an Indian-English secure-cloud
+lecture through Soniox `stt-rt-v5` with one-way Chinese translation. Compared with the saved local
+session, Soniox corrected important source errors including `NISC` to `NIST`, `cloud monitor` to
+`cloud auditor`, and `API clouding` to `API logging`. This was a qualitative same-audio review,
+not ground-truth WER.
+
+A second same-range run showed that context has asymmetric risk. Course-scoped
+`translation_terms` consistently produced `云服务审计方`, `云服务经纪商`, `云服务消费者`, and
+`云服务提供商`. A bare `CloudTrail` recognition term, however, forced the correct phrase
+`cloud carrier called the internet` into `CloudTrail called the internet`. A follow-up run showed
+that even `AWS CloudTrail` retained this false positive. LingoSlate now excludes this recognition
+hint from Soniox, keeps the translation preference, and repairs `cloud trail(s)` locally only when
+course cues support it. Future context changes must use same-range A/B audio and inspect false
+positives, not only terminology recall.
+
+The same sample also exposed endpoint behavior during continuous lecturing: Soniox produced one
+finalized bilingual segment of almost 90 seconds. A shared adapter soft-commit now finalizes only
+when both original and translated final tokens end a complete sentence and span at least 12
+seconds. The real-audio rerun produced 10 finalized segments with a maximum duration of 18.36
+seconds; short utterances still wait for the server endpoint.

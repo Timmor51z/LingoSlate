@@ -1,4 +1,5 @@
 import LingoSlateCore
+import AppKit
 import SwiftUI
 import Translation
 
@@ -6,6 +7,7 @@ struct ClassroomWorkspaceView: View {
     private enum FocusedField: Hashable {
         case courseName
         case courseTerms
+        case lecturerName
     }
 
     private struct TranscriptScrollKey: Equatable {
@@ -17,14 +19,22 @@ struct ClassroomWorkspaceView: View {
     }
 
     @Environment(\.openSettings) private var openSettings
+    @AppStorage("lingoslate.show-live-translation.v1") private var showsLiveTranslation = true
     @StateObject private var model: AppModel
     @State private var completedSurface: CompletedSurface = .summary
+    @State private var isShowingHistory = false
     @FocusState private var focusedField: FocusedField?
     private let transcriptBottomID = "transcript-bottom"
 
-    init(profileStore: UserProfileStore) {
+    init(
+        profileStore: UserProfileStore,
+        sonioxCredentialStore: SonioxCredentialStore
+    ) {
         _model = StateObject(
-            wrappedValue: AppModel(profileStore: profileStore)
+            wrappedValue: AppModel(
+                profileStore: profileStore,
+                sonioxCredentialStore: sonioxCredentialStore
+            )
         )
     }
 
@@ -40,7 +50,7 @@ struct ClassroomWorkspaceView: View {
             Divider()
             markerBar
         }
-        .frame(minWidth: 860, minHeight: 560)
+        .frame(minWidth: 760, minHeight: 520)
         .background(Color(nsColor: .windowBackgroundColor))
         .background {
             AppleTranslationSessionHost(engine: model.translationEngine)
@@ -58,6 +68,23 @@ struct ClassroomWorkspaceView: View {
                 focusedField = nil
             }
         }
+        .onReceive(
+            NSWorkspace.shared.notificationCenter.publisher(
+                for: NSWorkspace.willSleepNotification
+            )
+        ) { _ in
+            model.handleSystemWillSleep()
+        }
+        .onReceive(
+            NSWorkspace.shared.notificationCenter.publisher(
+                for: NSWorkspace.didWakeNotification
+            )
+        ) { _ in
+            model.handleSystemDidWake()
+        }
+        .sheet(isPresented: $isShowingHistory) {
+            SessionHistoryView(directoryURL: model.storedSessionDirectoryURL)
+        }
     }
 
     private var courseContextBar: some View {
@@ -69,6 +96,25 @@ struct ClassroomWorkspaceView: View {
                 .textFieldStyle(.plain)
                 .focused($focusedField, equals: .courseTerms)
                 .disabled(model.isActive || model.isWarmingUp)
+
+            Divider()
+                .frame(height: 20)
+
+            TextField("讲师（可选）", text: $model.lecturerName)
+                .textFieldStyle(.plain)
+                .focused($focusedField, equals: .lecturerName)
+                .frame(width: 110)
+                .disabled(model.isActive || model.isWarmingUp)
+
+            Picker("讲师口音", selection: $model.lecturerAccent) {
+                Text("口音自动").tag(nil as LecturerAccentProfile?)
+                ForEach(LecturerAccentProfile.allCases, id: \.self) { accent in
+                    Text(accent.displayName).tag(Optional(accent))
+                }
+            }
+            .labelsHidden()
+            .frame(width: 135)
+            .disabled(model.isActive || model.isWarmingUp)
 
             if let diagnostics = model.warmupDiagnostics,
                model.isCourseWarm || diagnostics.prewarmedRecognitionReused == true {
@@ -84,31 +130,70 @@ struct ClassroomWorkspaceView: View {
     }
 
     private var sessionToolbar: some View {
-        HStack(spacing: 12) {
-            TextField("课程名称（可选）", text: $model.courseName)
-                .textFieldStyle(.roundedBorder)
-                .focused($focusedField, equals: .courseName)
-                .frame(minWidth: 260, idealWidth: 360, maxWidth: 440)
-                .disabled(model.isActive || model.isWarmingUp)
-
-            Picker("场景", selection: $model.sessionKind) {
-                Text("课堂").tag(SessionKind.lecture)
-                Text("会议").tag(SessionKind.meeting)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                courseNameField
+                sessionKindPicker
+                processingModePicker
+                Spacer(minLength: 12)
+                sessionActions
             }
-            .pickerStyle(.segmented)
-            .frame(width: 150)
-            .disabled(model.isActive || model.isWarmingUp)
 
-            Picker("模式", selection: $model.processingMode) {
-                Text("省电").tag(ProcessingMode.local)
-                Text("高精度").tag(ProcessingMode.highAccuracy)
+            VStack(spacing: 8) {
+                HStack(spacing: 12) {
+                    courseNameField
+                    Spacer(minLength: 12)
+                    sessionActions
+                }
+
+                HStack(spacing: 12) {
+                    sessionKindPicker
+                    processingModePicker
+                    Spacer()
+                }
             }
-            .pickerStyle(.segmented)
-            .frame(width: 170)
-            .disabled(model.isActive || model.isWarmingUp)
-            .help("高精度适合课堂和会议；省电适合近距离清晰语音")
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+    }
 
-            Spacer(minLength: 12)
+    private var courseNameField: some View {
+        TextField("课程名称（可选）", text: $model.courseName)
+            .textFieldStyle(.roundedBorder)
+            .focused($focusedField, equals: .courseName)
+            .frame(minWidth: 220, idealWidth: 320, maxWidth: 440)
+            .disabled(model.isActive || model.isWarmingUp)
+    }
+
+    private var sessionKindPicker: some View {
+        Picker("场景", selection: $model.sessionKind) {
+            Text("课堂").tag(SessionKind.lecture)
+            Text("会议").tag(SessionKind.meeting)
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 140)
+        .disabled(model.isActive || model.isWarmingUp)
+    }
+
+    private var processingModePicker: some View {
+        Picker("模式", selection: $model.processingMode) {
+            Text("省电").tag(ProcessingMode.local)
+            Text("高精度").tag(ProcessingMode.highAccuracy)
+            Text("Soniox").tag(ProcessingMode.soniox)
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 220)
+        .disabled(model.isActive || model.isWarmingUp)
+        .help("Soniox 使用云端实时转写与翻译")
+    }
+
+    private var sessionActions: some View {
+        HStack(spacing: 8) {
+            Button(action: { isShowingHistory = true }) {
+                Image(systemName: "clock.arrow.circlepath")
+            }
+            .help("课堂记录")
+            .disabled(model.isActive)
 
             Button(action: { openSettings() }) {
                 Image(systemName: "person.crop.circle")
@@ -133,7 +218,12 @@ struct ClassroomWorkspaceView: View {
 
             if model.isActive {
                 Button(role: .destructive, action: model.stopSession) {
-                    Label("结束", systemImage: "stop.fill")
+                    Label(
+                        model.canSkipPostClassOptimization ? "跳过优化" : "结束",
+                        systemImage: model.canSkipPostClassOptimization
+                            ? "forward.end.fill"
+                            : "stop.fill"
+                    )
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(".", modifiers: [.command])
@@ -154,8 +244,6 @@ struct ClassroomWorkspaceView: View {
                 .keyboardShortcut(.return, modifiers: [.command])
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
     }
 
     private var statusBar: some View {
@@ -166,11 +254,16 @@ struct ClassroomWorkspaceView: View {
             Label(audioSourceLabel, systemImage: "mic.fill")
                 .foregroundStyle(.secondary)
 
-            TranslationStatusLabel(
-                engine: model.translationEngine,
-                isEnhanced: model.isEnhancedTranslationReady
-                    && model.processingMode == .highAccuracy
-            )
+            if model.processingMode == .soniox {
+                Label("Soniox 云端双语", systemImage: "cloud.fill")
+                    .foregroundStyle(.secondary)
+            } else {
+                TranslationStatusLabel(
+                    engine: model.translationEngine,
+                    isEnhanced: model.isEnhancedTranslationReady
+                        && model.processingMode == .highAccuracy
+                )
+            }
 
             if model.isActive, model.audioSource == .microphone {
                 ProgressView(value: Double(model.inputLevel))
@@ -203,6 +296,11 @@ struct ClassroomWorkspaceView: View {
             }
 
             Spacer()
+
+            Toggle("显示中文", isOn: $showsLiveTranslation)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .help(showsLiveTranslation ? "隐藏实时中文翻译" : "显示实时中文翻译")
 
             if !model.markers.isEmpty {
                 Label("\(model.markers.count)", systemImage: "bookmark.fill")
@@ -277,13 +375,18 @@ struct ClassroomWorkspaceView: View {
                     ForEach(model.snapshot.finalSegments) { segment in
                         SubtitleRow(
                             segment: segment,
-                            isCurrent: segment.id == model.snapshot.finalSegments.last?.id
+                            isCurrent: segment.id == model.snapshot.finalSegments.last?.id,
+                            showsTranslation: showsLiveTranslation,
+                            onCorrection: { model.correctSegment(id: segment.id, sourceText: $0) }
                         )
                         .id(segment.id)
                     }
 
                     if let provisional = model.snapshot.provisionalSegment {
-                        ProvisionalSubtitleRow(segment: provisional)
+                        ProvisionalSubtitleRow(
+                            segment: provisional,
+                            showsTranslation: showsLiveTranslation
+                        )
                             .id("provisional")
                     }
 
@@ -345,6 +448,36 @@ struct ClassroomWorkspaceView: View {
             .labelsHidden()
             .frame(width: 150)
             .disabled(model.isActive)
+
+            if model.audioSource == .microphone {
+                Picker("麦克风", selection: $model.selectedInputDeviceUID) {
+                    Text("系统默认麦克风").tag(nil as String?)
+                    ForEach(model.availableInputDevices) { device in
+                        Text(device.name).tag(Optional(device.uid))
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 220)
+                .disabled(model.isActive || model.isTestingMicrophone)
+
+                Button(action: model.refreshInputDevices) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("刷新麦克风设备")
+                .disabled(model.isActive || model.isTestingMicrophone)
+
+                Button(action: model.testSelectedMicrophone) {
+                    Image(systemName: model.isTestingMicrophone
+                        ? "stop.circle.fill"
+                        : "waveform.circle")
+                }
+                .buttonStyle(.borderless)
+                .help(model.isTestingMicrophone
+                    ? "停止试听录制"
+                    : "录制并播放 15 秒；可切换系统麦克风模式后分别试听")
+                .disabled(model.isActive)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
@@ -357,7 +490,9 @@ struct ClassroomWorkspaceView: View {
         return TranscriptScrollKey(
             finalCount: model.snapshot.finalSegments.count,
             latestSourceLength: latest?.sourceText.count ?? 0,
-            latestTranslationLength: latest?.translatedText?.count ?? 0,
+            latestTranslationLength: showsLiveTranslation
+                ? latest?.translatedText?.count ?? 0
+                : 0,
             provisionalID: provisional?.id,
             provisionalLength: provisional?.sourceText.count ?? 0
         )
@@ -397,7 +532,9 @@ struct ClassroomWorkspaceView: View {
     private var audioSourceLabel: String {
         switch model.audioSource {
         case .microphone:
-            return "麦克风"
+            return model.availableInputDevices.first {
+                $0.uid == model.selectedInputDeviceUID
+            }?.name ?? "麦克风"
         case .systemAudio:
             return "系统音频"
         case .mixed:
@@ -559,6 +696,10 @@ private struct TranslationStatusLabel: View {
 private struct SubtitleRow: View {
     let segment: TranscriptSegment
     let isCurrent: Bool
+    let showsTranslation: Bool
+    let onCorrection: (String) -> Void
+    @State private var isEditing = false
+    @State private var editedSourceText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -569,16 +710,46 @@ private struct SubtitleRow: View {
                     .frame(width: 52, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(segment.sourceText)
-                        .font(.system(size: 22, weight: isCurrent ? .semibold : .regular))
-                        .foregroundStyle(isCurrent ? .primary : .secondary)
-                        .textSelection(.enabled)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        if isEditing {
+                            TextField("英文转写", text: $editedSourceText, axis: .vertical)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 22))
 
-                    if let translatedText = segment.translatedText {
+                            Button(action: saveCorrection) {
+                                Image(systemName: "checkmark")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("保存修正并重新翻译")
+
+                            Button(action: { isEditing = false }) {
+                                Image(systemName: "xmark")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("取消")
+                        } else {
+                            Text(segment.sourceText)
+                                .font(.system(size: 22, weight: isCurrent ? .semibold : .regular))
+                                .foregroundStyle(isCurrent ? .primary : .secondary)
+                                .textSelection(.enabled)
+
+                            Button(action: beginCorrection) {
+                                Image(systemName: "pencil")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("修正英文转写")
+                        }
+                    }
+
+                    if showsTranslation, let translatedText = segment.translatedText {
                         Text(translatedText)
                             .font(.system(size: 19, weight: .regular))
                             .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
                             .textSelection(.enabled)
+                    } else if segment.translationExclusionReason != nil {
+                        Label("中文讨论，已跳过翻译", systemImage: "text.bubble")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -594,21 +765,46 @@ private struct SubtitleRow: View {
         let seconds = max(0, Int(time))
         return String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
+
+    private func beginCorrection() {
+        editedSourceText = segment.sourceText
+        isEditing = true
+    }
+
+    private func saveCorrection() {
+        let corrected = editedSourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !corrected.isEmpty else { return }
+        onCorrection(corrected)
+        isEditing = false
+    }
 }
 
 private struct ProvisionalSubtitleRow: View {
     let segment: TranscriptSegment
+    let showsTranslation: Bool
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: "waveform")
                 .foregroundStyle(.orange)
                 .frame(width: 52, alignment: .leading)
 
-            Text(segment.sourceText)
-                .font(.system(size: 22))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 7) {
+                Text(segment.sourceText)
+                    .font(.system(size: 22))
+                    .foregroundStyle(.secondary)
+
+                if showsTranslation, let translatedText = segment.translatedText {
+                    Text(translatedText)
+                        .font(.system(size: 19))
+                        .foregroundStyle(.secondary)
+                } else if segment.translationExclusionReason != nil {
+                    Label("中文讨论，已跳过翻译", systemImage: "text.bubble")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 18)
     }
