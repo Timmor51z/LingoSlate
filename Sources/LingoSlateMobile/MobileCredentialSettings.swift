@@ -10,12 +10,11 @@ public final class MobileCredentialSettings: ObservableObject {
     @Published public private(set) var errorMessage: String?
 
     private static let endpointKey = "LingoSlate.Mobile.CredentialEndpoint"
-    private static let keychainService = "com.timmor51z.LingoSlate"
+    private static let keychainService = Bundle.main.bundleIdentifier ?? "com.lingoslate.app"
     private static let keychainAccount = "soniox-broker-token"
 
     public init() {
-        endpointText = UserDefaults.standard.string(forKey: Self.endpointKey)
-            ?? "https://lingoslate-soniox-key-broker.timmor51z.workers.dev/v1/soniox/temporary-key"
+        endpointText = UserDefaults.standard.string(forKey: Self.endpointKey) ?? ""
         brokerToken = Self.readToken() ?? ""
     }
 

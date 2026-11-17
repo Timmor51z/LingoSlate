@@ -71,21 +71,21 @@
 
 ## Verification status
 
-- Xcode 26.6 is installed on the external APFS volume at `/Volumes/Disk/Applications/Xcode.app`.
+- Xcode 26.6 with Swift 6.2 is the currently verified development toolchain.
 - All Swift source files pass `swiftc -parse`.
 - Full package build and tests run with the external Xcode selected through `DEVELOPER_DIR`.
 - `swift test` builds the shared core, Mac executable, and test bundle successfully.
-- All 106 tests pass in the host Xcode build, with one optional local-model smoke test skipped when its model path is not configured. Coverage includes bounded recording/ASR/translation queues, microphone route-change filtering, failure salvage, cancellation teardown, stale-audio recovery, offline timing, legacy JSON compatibility, session deletion, Chinese-discussion exclusion, Soniox bilingual token separation and translation pass-through, stable-sentence soft commits, short-utterance endpoint protection, cloud-term risk controls, course-scoped translation terminology, strict TranslateGemma prompts, translation provenance, modality checks, mobile terminology, Indian English alias false positives, contextual refinement, correction history and retranslation, long-prefix cursor behavior, adaptive gain, M4A replay, Apple translation coordination, summaries, compact-window UI rendering, Soniox configuration, endpoint grouping, language preservation, and Mac mode routing.
+- All 122 tests pass in the host Xcode build, with one optional local-model smoke test skipped when its model path is not configured. Coverage includes bounded recording/ASR/translation queues, microphone route-change filtering, failure salvage, cancellation teardown, stale-audio recovery, offline timing, legacy JSON compatibility, session deletion, Chinese-discussion exclusion, Soniox bilingual token separation and translation pass-through, stable-sentence soft commits, short-utterance endpoint protection, cloud-term risk controls, course-scoped translation terminology, strict TranslateGemma prompts, translation provenance, modality checks, mobile terminology, Indian English alias false positives, contextual refinement, correction history and retranslation, long-prefix cursor behavior, adaptive gain, M4A replay, Apple translation coordination, summaries, compact-window UI rendering, Soniox configuration, endpoint grouping, language preservation, and Mac mode routing.
 - A 25-minute 57-second same-audio Soniox A/B completed at realtime speed. Its combined LecSync agreement error was 12.94%, versus 21.57% for local live recognition and 19.27% for local offline recognition. These remain competitor-agreement diagnostics, not ground-truth WER.
 - A separate 120-second Indian-English secure-cloud sample validated Soniox transcription and Chinese translation end to end. Soniox corrected local errors including `NISC`/`NIST`, `cloud monitor`/`cloud auditor`, and `API clouding`/`API logging`. Translation terms stabilized cloud-role Chinese, while both `CloudTrail` and `AWS CloudTrail` recognition hints over-biased `cloud carrier`; the adapter now excludes that ambiguous recognition hint, repairs `cloud trail(s)` locally only with course cues, and enables cloud translation terms only for cloud-related courses.
 - `LingoSlateSoniox` is now a Foundation-only Swift target that depends only on `LingoSlateCore`; an iPhone target can reuse it without linking FluidAudio or MLX.
-- `LingoSlateMobile` and the iPhone app entry compile for `arm64-apple-ios18.0` against the installed iPhoneOS SDK. Five focused mobile lifecycle, persistence, and broker-contract tests pass on macOS; the Worker has five additional security/contract tests. Installing and launching on the connected iPhone remains blocked until Xcode's matching iOS 26.5 device-support component is installed.
+- `LingoSlateMobile` and the iPhone app entry compile for iOS 18 or later. The complete iOS simulator app build succeeds, six focused mobile lifecycle, persistence, and broker-contract tests pass on macOS, and the Worker has five additional security and contract tests.
 - On the same 120-second lecture sample, bilingual stable-sentence soft commits reduced the longest finalized Soniox segment from about 90 seconds to 18.36 seconds while retaining server endpoints for short utterances.
 
-Set the external Xcode as the active developer directory once:
+Select Xcode as the active developer directory once:
 
 ```bash
-sudo xcode-select -s /Volumes/Disk/Applications/Xcode.app/Contents/Developer
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 sudo xcodebuild -license accept
 xcodebuild -runFirstLaunch
 xcodebuild -version

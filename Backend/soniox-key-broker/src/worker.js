@@ -42,7 +42,7 @@ export async function handleRequest(request, env, fetchUpstream) {
         single_use: true,
         max_session_duration_seconds: 14_400,
         client_reference_id:
-          env.CLIENT_REFERENCE_ID || "lingoslate-ios-personal",
+          env.CLIENT_REFERENCE_ID || "lingoslate-ios-self-hosted",
       }),
     });
   } catch {
