@@ -53,8 +53,8 @@ Local modes keep classroom audio, transcription, translation, summaries, and ses
 ## Quick Start: macOS Local Mode
 
 ```bash
-git clone https://github.com/Timmor51z/leccue.git
-cd leccue
+git clone https://github.com/Timmor51z/LingoSlate.git
+cd LingoSlate
 
 sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 xcodebuild -downloadComponent MetalToolchain

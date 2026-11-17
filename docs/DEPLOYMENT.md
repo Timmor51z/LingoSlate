@@ -54,8 +54,8 @@ xcodebuild -downloadComponent MetalToolchain
 Clone and verify the repository:
 
 ```bash
-git clone https://github.com/Timmor51z/leccue.git
-cd leccue
+git clone https://github.com/Timmor51z/LingoSlate.git
+cd LingoSlate
 swift package resolve
 swift test --disable-sandbox
 ```
